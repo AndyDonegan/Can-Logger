@@ -16,6 +16,10 @@
     <None Update="can-scheme.csv">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Include=".vendor/waveshare/ControlCANFD.dll"
+          Link="ControlCANFD.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          Condition="Exists('.vendor/waveshare/ControlCANFD.dll')" />
   </ItemGroup>
 
 </Project>

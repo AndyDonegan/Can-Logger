@@ -10,29 +10,21 @@ namespace CanLogger;
 /// </summary>
 public class CanAnalyzerApp
 {
-    private readonly ICanBackend _backend;
+    private ICanBackend _backend;
     private readonly bool _stdinMode;
     private ListStore _messageStore = null!;
     private TreeView _treeView = null!;
     private Window _window = null!;
 
     // Controls
-    private Entry _interfaceEntry = null!;
+    private ComboBoxText _interfaceCombo = null!;
     private ComboBoxText _bitrateCombo = null!;
+    private Button _refreshInterfacesBtn = null!;
     private Button _startStopBtn = null!;
     private Button _clearBtn = null!;
     private Button _logBtn = null!;
     private CheckButton _lockScrollCheck = null!;
-    private Label _idLabel = null!;
-    private Label _dataLabel = null!;
-    private Entry _sendIdEntry = null!;
-    private Entry _sendDataEntry = null!;
-    private Button _hexDecToggle = null!;
-    private CheckButton _extendedCheck = null!;
-    private Button _sendBtn = null!;
-    private Entry _periodEntry = null!;
-    private Button _periodicBtn = null!;
-    private bool _inputIsHex = true;
+    private readonly List<SendFrameControls> _sendFrames = new();
     private TreeView _watchTreeView = null!;
     private ListStore _watchStore = null!;
     private HashSet<uint> _filterIds = new();
@@ -44,19 +36,48 @@ public class CanAnalyzerApp
     private int _messageCount;
     private bool _logEnabled;
     private StreamWriter? _logWriter;
-    private bool _periodicRunning;
     private readonly object _logLock = new();
 
     private const int MaxLogRows = 2000;
+    private static readonly string[] SendFrameBackgroundColors =
+        { "#D9ECFF", "#FFF0C2", "#DDF5E3" };
+    private static readonly string[] SendFrameMarkerColors =
+        { "#2F80ED", "#E09A00", "#219653" };
 
     // Column indices in ListStore
-    private enum Col { Num, Timestamp, IdDec, DataDec, IdHex, Dlc, DataHex, Desc, Type, Count }
+    private enum Col
+    {
+        Num, Timestamp, IdDec, DataDec, IdHex, Dlc, DataHex, Desc, Type,
+        SendSlot, RowBackground, Count
+    }
+
+    private sealed class SendFrameControls
+    {
+        public int Index { get; init; }
+        public Label IdLabel { get; init; } = null!;
+        public Label DataLabel { get; init; } = null!;
+        public Entry IdEntry { get; init; } = null!;
+        public Entry DataEntry { get; init; } = null!;
+        public Button HexDecToggle { get; init; } = null!;
+        public CheckButton ExtendedCheck { get; init; } = null!;
+        public Button SendButton { get; init; } = null!;
+        public Entry PeriodEntry { get; init; } = null!;
+        public Button PeriodicButton { get; init; } = null!;
+        public bool InputIsHex { get; set; } = true;
+        public bool PeriodicRunning { get; set; }
+    }
 
     // ------------------------------------------------------------------
     // Application entry point
     // ------------------------------------------------------------------
     public static void Main(string[] args)
     {
+        if (args.Contains("--waveshare-bridge"))
+        {
+            Environment.ExitCode = WaveshareBridgeProgram.Run(args);
+            return;
+        }
+
         bool stdinMode = args.Contains("--stdin") || args.Contains("-s");
 
         // Load CAN bus scheme (shipped alongside the binary)
@@ -111,18 +132,36 @@ public class CanAnalyzerApp
         controlBar.Margin = 5;
 
         controlBar.PackStart(new Label("Interface:"), false, false, 0);
-        _interfaceEntry = _stdinMode
-            ? new Entry("stdin (pipe)") { WidthChars = 10, IsEditable = false }
-            : new Entry("can0") { WidthChars = 10 };
-        controlBar.PackStart(_interfaceEntry, false, false, 2);
+        _interfaceCombo = ComboBoxText.NewWithEntry();
+        _interfaceCombo.SetSizeRequest(150, -1);
+        if (_stdinMode)
+        {
+            _interfaceCombo.AppendText("stdin (pipe)");
+            _interfaceCombo.Active = 0;
+            _interfaceCombo.Sensitive = false;
+        }
+        else
+        {
+            RefreshCanInterfaces();
+            _interfaceCombo.TooltipText =
+                "Detected SocketCAN interfaces and Waveshare USB-CAN-FD channels.";
+        }
+        controlBar.PackStart(_interfaceCombo, false, false, 2);
+
+        _refreshInterfacesBtn = new Button("Refresh") { FocusOnClick = false };
+        _refreshInterfacesBtn.Clicked += (_, _) => RefreshCanInterfaces();
+        _refreshInterfacesBtn.TooltipText = "Scan again for CAN interfaces";
+        controlBar.PackStart(_refreshInterfacesBtn, false, false, 0);
 
         controlBar.PackStart(new Label("Bitrate:"), false, false, 0);
-        _bitrateCombo = ComboBoxText.NewWithEntry();
+        _bitrateCombo = new ComboBoxText();
         foreach (var br in new[] { "10000", "20000", "50000", "100000", "125000",
                                    "250000", "500000", "800000", "1000000" })
             _bitrateCombo.AppendText(br);
-        _bitrateCombo.Entry.Text = "500000";
+        _bitrateCombo.Active = 4; // 125000 — the target bus used by this project
         _bitrateCombo.SetSizeRequest(100, -1);
+        _bitrateCombo.TooltipText =
+            "CAN bus speed. The app applies this to a local CAN interface when Start is clicked.";
         controlBar.PackStart(_bitrateCombo, false, false, 2);
 
         _startStopBtn = new Button("▶ Start");
@@ -232,7 +271,9 @@ public class CanAnalyzerApp
             typeof(int),    // DLC
             typeof(string), // Data (hex)
             typeof(string), // Description
-            typeof(string)  // Type
+            typeof(string), // Type
+            typeof(int),    // Assigned send-frame slot (0 means unassigned)
+            typeof(string)  // Assigned row background, or transparent when unassigned
         );
 
         _treeView = new TreeView(_messageStore)
@@ -242,6 +283,7 @@ public class CanAnalyzerApp
             HasTooltip = true,
         };
         _treeView.QueryTooltip += OnTreeViewQueryTooltip;
+        _treeView.ButtonPressEvent += OnMessageButtonPress;
 
         AddColumn("#", Col.Num, 40);
         AddColumn("Timestamp", Col.Timestamp, 130);
@@ -262,47 +304,11 @@ public class CanAnalyzerApp
 
         mainBox.PackStart(paned, true, true, 5);
 
-        // -- Send frame panel -----------------------------------------------
-        var sendFrame = new Frame("Send CAN Frame");
-        var sendBox = new Box(Orientation.Horizontal, 4);
-        sendBox.Margin = 5;
-
-        _idLabel = new Label("ID (hex):");
-        sendBox.PackStart(_idLabel, false, false, 0);
-        _sendIdEntry = new Entry("7DF") { WidthChars = 8 };
-        sendBox.PackStart(_sendIdEntry, false, false, 2);
-
-        _dataLabel = new Label("Data (hex bytes):");
-        sendBox.PackStart(_dataLabel, false, false, 0);
-        _sendDataEntry = new Entry("02 01 00") { WidthChars = 30 };
-        sendBox.PackStart(_sendDataEntry, false, false, 2);
-
-        _hexDecToggle = new Button("Hex");
-        _hexDecToggle.Clicked += OnToggleHexDec;
-        sendBox.PackStart(_hexDecToggle, false, false, 2);
-
-        _extendedCheck = new CheckButton("Extended ID");
-        _extendedCheck.Active = false;
-        sendBox.PackStart(_extendedCheck, false, false, 2);
-
-        _sendBtn = new Button("Send");
-        _sendBtn.Sensitive = false;
-        _sendBtn.Clicked += OnSendFrame;
-        sendBox.PackStart(_sendBtn, false, false, 4);
-
-        sendBox.PackStart(new Separator(Orientation.Vertical), false, false, 4);
-
-        sendBox.PackStart(new Label("Periodic (ms):"), false, false, 0);
-        _periodEntry = new Entry("") { WidthChars = 6 };
-        sendBox.PackStart(_periodEntry, false, false, 2);
-
-        _periodicBtn = new Button("Start Periodic");
-        _periodicBtn.Sensitive = false;
-        _periodicBtn.Clicked += OnTogglePeriodic;
-        sendBox.PackStart(_periodicBtn, false, false, 2);
-
-        sendFrame.Add(sendBox);
-        mainBox.PackStart(sendFrame, false, false, 5);
+        // -- Send frame panels ----------------------------------------------
+        var sendFramesBox = new Box(Orientation.Vertical, 2);
+        for (int index = 0; index < 3; index++)
+            sendFramesBox.PackStart(BuildSendFramePanel(index), false, false, 0);
+        mainBox.PackStart(sendFramesBox, false, false, 5);
 
         // -- Status bar -----------------------------------------------------
         var statusBar = new Box(Orientation.Horizontal, 4);
@@ -320,10 +326,64 @@ public class CanAnalyzerApp
         if (_stdinMode)
         {
             _bitrateCombo.Sensitive = false;
+            _bitrateCombo.TooltipText =
+                "Bitrate is configured on the remote machine in stdin/SSH mode.";
+            _refreshInterfacesBtn.Sensitive = false;
         }
 
         win.Add(mainBox);
         return win;
+    }
+
+    private Frame BuildSendFramePanel(int index)
+    {
+        var sendBox = new Box(Orientation.Horizontal, 4) { Margin = 5 };
+        var controls = new SendFrameControls
+        {
+            Index = index,
+            IdLabel = new Label("ID (hex):"),
+            DataLabel = new Label("Data (hex bytes):"),
+            IdEntry = new Entry("7DF") { WidthChars = 8 },
+            DataEntry = new Entry("02 01 00") { WidthChars = 30 },
+            HexDecToggle = new Button("Hex"),
+            ExtendedCheck = new CheckButton("Extended ID"),
+            SendButton = new Button("Send") { Sensitive = false },
+            PeriodEntry = new Entry("") { WidthChars = 6 },
+            PeriodicButton = new Button("Start Periodic") { Sensitive = false },
+        };
+
+        controls.HexDecToggle.Clicked += (_, _) => ToggleHexDec(controls);
+        controls.SendButton.Clicked += (_, _) => SendFrame(controls);
+        controls.PeriodicButton.Clicked += (_, _) => TogglePeriodic(controls);
+
+        sendBox.PackStart(controls.IdLabel, false, false, 0);
+        sendBox.PackStart(controls.IdEntry, false, false, 2);
+        sendBox.PackStart(controls.DataLabel, false, false, 0);
+        sendBox.PackStart(controls.DataEntry, false, false, 2);
+        sendBox.PackStart(controls.HexDecToggle, false, false, 2);
+        sendBox.PackStart(controls.ExtendedCheck, false, false, 2);
+        sendBox.PackStart(controls.SendButton, false, false, 4);
+        sendBox.PackStart(new Separator(Orientation.Vertical), false, false, 4);
+        sendBox.PackStart(new Label("Periodic (ms):"), false, false, 0);
+        sendBox.PackStart(controls.PeriodEntry, false, false, 2);
+        sendBox.PackStart(controls.PeriodicButton, false, false, 2);
+
+        _sendFrames.Add(controls);
+        string instruction = index switch
+        {
+            0 => "click",
+            1 => "Shift-click",
+            _ => "Ctrl-click",
+        };
+        var titleLabel = new Label
+        {
+            UseMarkup = true,
+            Markup = $"<span foreground=\"{SendFrameMarkerColors[index]}\">■</span> " +
+                $"Send CAN Frame {index + 1} ({instruction} a received frame)",
+        };
+        var frame = new Frame { LabelWidget = titleLabel };
+        frame.Add(sendBox);
+        return frame;
     }
 
     private void AddColumn(string title, Col col, int width)
@@ -337,6 +397,7 @@ public class CanAnalyzerApp
         };
         column.PackStart(cell, true);
         column.AddAttribute(cell, "text", (int)col);
+        column.AddAttribute(cell, "cell-background", (int)Col.RowBackground);
         _treeView.AppendColumn(column);
     }
 
@@ -401,7 +462,8 @@ public class CanAnalyzerApp
         string frameType = msg.FrameType;
 
         _messageStore.InsertWithValues(0,
-            _messageCount, ts, (int)msg.ArbitrationId, dataDec, idHex, (int)msg.Dlc, dataHex, desc, frameType);
+            _messageCount, ts, (int)msg.ArbitrationId, dataDec, idHex, (int)msg.Dlc,
+            dataHex, desc, frameType, 0, "rgba(0,0,0,0)");
 
         // Auto-scroll to top unless locked
         if (!_lockScrollCheck.Active)
@@ -448,12 +510,19 @@ public class CanAnalyzerApp
         {
             try
             {
-                string iface = _stdinMode ? "stdin" : _interfaceEntry.Text.Trim();
+                string iface = _stdinMode ? "stdin" : _interfaceCombo.Entry.Text.Trim();
+                int bitrate = GetSelectedBitrate();
+                if (!_stdinMode)
+                    SelectBackend(iface, bitrate);
+                if (!_stdinMode && !WaveshareWindowsBackend.IsWaveshareInterface(iface))
+                    CanInterfaceManager.EnsureReady(iface, bitrate);
                 _backend.Start(iface);
                 _startStopBtn.Label = "\u23f9 Stop";
-                _sendBtn.Sensitive = true;
-                _periodicBtn.Sensitive = true;
-                _statusLabel.Text = $"Connected \u2014 {iface}";
+                SetSendControlsSensitive(true);
+                SetConnectionControlsSensitive(false);
+                _statusLabel.Text = _stdinMode
+                    ? $"Connected \u2014 {iface}"
+                    : $"Connected \u2014 {iface} @ {bitrate} bit/s";
             }
             catch (Exception ex)
             {
@@ -464,40 +533,124 @@ public class CanAnalyzerApp
         }
     }
 
-    private void OnToggleHexDec(object? sender, EventArgs e)
+    private void ToggleHexDec(SendFrameControls controls)
     {
-        _inputIsHex = !_inputIsHex;
-        if (_inputIsHex)
+        controls.InputIsHex = !controls.InputIsHex;
+        if (controls.InputIsHex)
         {
-            _hexDecToggle.Label = "Hex";
-            _idLabel.Text = "ID (hex):";
-            _dataLabel.Text = "Data (hex bytes):";
+            controls.HexDecToggle.Label = "Hex";
+            controls.IdLabel.Text = "ID (hex):";
+            controls.DataLabel.Text = "Data (hex bytes):";
         }
         else
         {
-            _hexDecToggle.Label = "Dec";
-            _idLabel.Text = "ID (dec):";
-            _dataLabel.Text = "Data (dec bytes):";
+            controls.HexDecToggle.Label = "Dec";
+            controls.IdLabel.Text = "ID (dec):";
+            controls.DataLabel.Text = "Data (dec bytes):";
         }
+
+        PopulateSendFieldsFromAssignedRow(controls);
     }
 
-    private void OnSendFrame(object? sender, EventArgs e)
+    private void OnMessageButtonPress(object o, ButtonPressEventArgs args)
+    {
+        if (args.Event.Button != 1 ||
+            !_treeView.GetPathAtPos((int)args.Event.X, (int)args.Event.Y,
+                out TreePath path, out _) ||
+            !_messageStore.GetIter(out TreeIter iter, path))
+            return;
+
+        string frameType = (string)_messageStore.GetValue(iter, (int)Col.Type);
+        if (frameType == "ERR")
+            return;
+
+        Gdk.ModifierType modifiers = args.Event.State;
+        int sendFrameIndex = (modifiers & Gdk.ModifierType.ControlMask) != 0
+            ? 2
+            : (modifiers & Gdk.ModifierType.ShiftMask) != 0 ? 1 : 0;
+        AssignRowToSendFrame(iter, sendFrameIndex);
+        args.RetVal = true;
+    }
+
+    private void AssignRowToSendFrame(TreeIter selectedIter, int sendFrameIndex)
+    {
+        if (sendFrameIndex < 0 || sendFrameIndex >= _sendFrames.Count)
+            return;
+
+        int assignedSlot = sendFrameIndex + 1;
+        _messageStore.Foreach((model, path, iter) =>
+        {
+            if ((int)_messageStore.GetValue(iter, (int)Col.SendSlot) == assignedSlot)
+            {
+                _messageStore.SetValue(iter, (int)Col.SendSlot, 0);
+                _messageStore.SetValue(iter, (int)Col.RowBackground, "rgba(0,0,0,0)");
+            }
+            return false;
+        });
+
+        _messageStore.SetValue(selectedIter, (int)Col.SendSlot, assignedSlot);
+        _messageStore.SetValue(selectedIter, (int)Col.RowBackground,
+            SendFrameBackgroundColors[sendFrameIndex]);
+        _treeView.QueueDraw();
+        PopulateSendFields(selectedIter, _sendFrames[sendFrameIndex]);
+    }
+
+    private void PopulateSendFieldsFromAssignedRow(SendFrameControls controls)
+    {
+        int assignedSlot = controls.Index + 1;
+        _messageStore.Foreach((model, path, iter) =>
+        {
+            if ((int)_messageStore.GetValue(iter, (int)Col.SendSlot) != assignedSlot)
+                return false;
+
+            PopulateSendFields(iter, controls);
+            return true;
+        });
+    }
+
+    private void PopulateSendFields(TreeIter iter, SendFrameControls controls)
+    {
+        string frameType = (string)_messageStore.GetValue(iter, (int)Col.Type);
+        if (frameType == "ERR")
+            return;
+
+        int arbitrationId = (int)_messageStore.GetValue(iter, (int)Col.IdDec);
+        if (controls.InputIsHex)
+        {
+            string idHex = (string)_messageStore.GetValue(iter, (int)Col.IdHex);
+            string dataHex = (string)_messageStore.GetValue(iter, (int)Col.DataHex);
+            controls.IdEntry.Text = idHex.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                ? idHex[2..]
+                : idHex;
+            controls.DataEntry.Text = dataHex == "-" ? "" : dataHex;
+        }
+        else
+        {
+            string dataDec = (string)_messageStore.GetValue(iter, (int)Col.DataDec);
+            controls.IdEntry.Text = arbitrationId.ToString();
+            controls.DataEntry.Text = dataDec == "-" ? "" : dataDec;
+        }
+
+        controls.ExtendedCheck.Active = frameType == "EXT";
+    }
+
+    private void SendFrame(SendFrameControls controls)
     {
         try
         {
             uint id;
             byte[] data;
-            if (_inputIsHex)
+            if (controls.InputIsHex)
             {
-                id = Convert.ToUInt32(_sendIdEntry.Text.Trim(), 16);
-                data = ParseHexData(_sendDataEntry.Text.Trim());
+                id = Convert.ToUInt32(controls.IdEntry.Text.Trim(), 16);
+                data = ParseHexData(controls.DataEntry.Text.Trim());
             }
             else
             {
-                id = uint.Parse(_sendIdEntry.Text.Trim());
-                data = ParseDecData(_sendDataEntry.Text.Trim());
+                id = uint.Parse(controls.IdEntry.Text.Trim());
+                data = ParseDecData(controls.DataEntry.Text.Trim());
             }
-            bool isExt = _extendedCheck.Active;
+            bool isExt = controls.ExtendedCheck.Active;
             _backend.Send(id, data, isExt);
         }
         catch (Exception ex)
@@ -623,41 +776,47 @@ public class CanAnalyzerApp
         dialog.Destroy();
     }
 
-    private void OnTogglePeriodic(object? sender, EventArgs e)
+    private void TogglePeriodic(SendFrameControls controls)
     {
-        if (_periodicRunning)
+        if (controls.PeriodicRunning)
         {
-            StopPeriodic();
+            StopPeriodic(controls);
         }
         else
         {
-            if (!int.TryParse(_periodEntry.Text.Trim(), out int ms) || ms <= 0)
+            if (!int.TryParse(controls.PeriodEntry.Text.Trim(), out int ms) || ms <= 0)
             {
                 ShowError("Error", "Enter a positive interval in ms.");
                 return;
             }
-            _periodicRunning = true;
-            _periodicBtn.Label = "Stop Periodic";
-            SchedulePeriodic(ms);
+            controls.PeriodicRunning = true;
+            controls.PeriodicButton.Label = "Stop Periodic";
+            SchedulePeriodic(controls, ms);
         }
     }
 
-    private void SchedulePeriodic(int intervalMs)
+    private void SchedulePeriodic(SendFrameControls controls, int intervalMs)
     {
-        if (!_periodicRunning) return;
-        OnSendFrame(null, EventArgs.Empty);
+        if (!controls.PeriodicRunning) return;
+        SendFrame(controls);
         GLib.Timeout.Add((uint)intervalMs, () =>
         {
-            if (_periodicRunning && _backend.IsRunning)
-                OnSendFrame(null, EventArgs.Empty);
-            return _periodicRunning;
+            if (controls.PeriodicRunning && _backend.IsRunning)
+                SendFrame(controls);
+            return controls.PeriodicRunning;
         });
     }
 
-    private void StopPeriodic()
+    private static void StopPeriodic(SendFrameControls controls)
     {
-        _periodicRunning = false;
-        _periodicBtn.Label = "Start Periodic";
+        controls.PeriodicRunning = false;
+        controls.PeriodicButton.Label = "Start Periodic";
+    }
+
+    private void StopAllPeriodic()
+    {
+        foreach (SendFrameControls controls in _sendFrames)
+            StopPeriodic(controls);
     }
 
     private void OnToggleLogging(object? sender, EventArgs e)
@@ -723,13 +882,22 @@ public class CanAnalyzerApp
 
     private void StopAll()
     {
-        StopPeriodic();
+        StopAllPeriodic();
         StopLogging();
         _backend.Stop();
         _startStopBtn.Label = "\u25b6 Start";
-        _sendBtn.Sensitive = false;
-        _periodicBtn.Sensitive = false;
+        SetSendControlsSensitive(false);
+        SetConnectionControlsSensitive(true);
         UpdateStatus();
+    }
+
+    private void SetSendControlsSensitive(bool sensitive)
+    {
+        foreach (SendFrameControls controls in _sendFrames)
+        {
+            controls.SendButton.Sensitive = sensitive;
+            controls.PeriodicButton.Sensitive = sensitive;
+        }
     }
 
     private void UpdateStatus()
@@ -737,12 +905,75 @@ public class CanAnalyzerApp
         if (_backend.IsRunning)
         {
             string extra = _logEnabled ? " (logging)" : "";
-            _statusLabel.Text = $"Connected \u2014 {_backend.InterfaceName}{extra}";
+            string bitrate = _stdinMode ? "" : $" @ {GetSelectedBitrate()} bit/s";
+            _statusLabel.Text = $"Connected \u2014 {_backend.InterfaceName}{bitrate}{extra}";
         }
         else
         {
             _statusLabel.Text = "Disconnected";
         }
+    }
+
+    private void RefreshCanInterfaces()
+    {
+        if (_stdinMode || _interfaceCombo == null)
+            return;
+
+        string current = _interfaceCombo.Entry.Text.Trim();
+        var interfaces = CanInterfaceManager.GetCanInterfaces()
+            .Concat(WaveshareWindowsBackend.GetAvailableInterfaces())
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        // Keep the conventional name available before an adapter is plugged in,
+        // and retain a manually-entered interface such as slcan0.
+        if (!interfaces.Contains("can0", StringComparer.Ordinal))
+            interfaces.Add("can0");
+        if (!string.IsNullOrEmpty(current) &&
+            !interfaces.Contains(current, StringComparer.Ordinal))
+            interfaces.Add(current);
+
+        _interfaceCombo.RemoveAll();
+        foreach (string iface in interfaces.OrderBy(name => name, StringComparer.OrdinalIgnoreCase))
+            _interfaceCombo.AppendText(iface);
+
+        string selected = string.IsNullOrEmpty(current) ? interfaces[0] : current;
+        _interfaceCombo.Entry.Text = selected;
+    }
+
+    private int GetSelectedBitrate()
+    {
+        string? text = _bitrateCombo.ActiveText;
+        if (!int.TryParse(text, out int bitrate) || bitrate <= 0)
+            throw new ArgumentException("Select a valid CAN bitrate.");
+        return bitrate;
+    }
+
+    private void SelectBackend(string interfaceName, int bitrate)
+    {
+        ICanBackend backend = WaveshareWindowsBackend.IsWaveshareInterface(interfaceName)
+            ? new WaveshareWindowsBackend(bitrate)
+            : new CanBackend();
+
+        _backend.Stop();
+        _backend.OnMessageReceived -= OnCanMessage;
+        _backend.OnError -= OnCanError;
+        if (_backend is IDisposable disposable)
+            disposable.Dispose();
+
+        _backend = backend;
+        _backend.OnMessageReceived += OnCanMessage;
+        _backend.OnError += OnCanError;
+    }
+
+    private void SetConnectionControlsSensitive(bool sensitive)
+    {
+        if (_stdinMode)
+            return;
+
+        _interfaceCombo.Sensitive = sensitive;
+        _refreshInterfacesBtn.Sensitive = sensitive;
+        _bitrateCombo.Sensitive = sensitive;
     }
 
     private static byte[] ParseHexData(string text)
@@ -809,4 +1040,3 @@ public class CanAnalyzerApp
         dialog.Destroy();
     }
 }
-

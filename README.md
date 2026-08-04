@@ -1,6 +1,6 @@
 # CanLogger — CAN Bus Analyzer
 
-A **GTK# 3 desktop application** written in **C# (.NET 8)** for monitoring and sending CAN bus frames on Linux. Uses raw **Linux SocketCAN** via P/Invoke for local hardware, or an **SSH pipe** from `candump` for remote CAN buses.
+A **GTK# 3 desktop application** written in **C# (.NET 8)** for monitoring and sending CAN bus frames. It supports raw **Linux SocketCAN**, the Windows-only **Waveshare USB-CAN-FD** through a WSL-to-Windows bridge, and an **SSH pipe** from `candump` for remote CAN buses.
 
 ---
 
@@ -15,7 +15,8 @@ A **GTK# 3 desktop application** written in **C# (.NET 8)** for monitoring and s
 - [Build & Run](#build--run)
 - [Usage](#usage)
   - [Mode 1 — Local CAN Hardware](#mode-1--local-can-hardware)
-  - [Mode 2 — Remote CAN via SSH Pipe](#mode-2--remote-can-via-ssh-pipe)
+  - [Mode 2 — Waveshare USB-CAN-FD](#mode-2--waveshare-usb-can-fd)
+  - [Mode 3 — Remote CAN via SSH Pipe](#mode-3--remote-can-via-ssh-pipe)
 - [GUI Walkthrough](#gui-walkthrough)
 - [CAN Scheme CSV](#can-scheme-csv)
 - [Permissions](#permissions)
@@ -27,10 +28,11 @@ A **GTK# 3 desktop application** written in **C# (.NET 8)** for monitoring and s
 ## Features
 
 - **Live CAN frame monitoring** — real-time table with timestamp, ID, DLC, data bytes, and frame type
-- **Send single CAN frames** — specify hex ID and space-separated hex data bytes
+- **Three independent send frames** — configure and transmit three different messages, each with its own periodic timer
+- **Colour-coded click-to-reuse frames** — click, Shift-click, or Ctrl-click received rows to populate send frames 1, 2, or 3
 - **Periodic frame transmission** — send a frame repeatedly at a configurable interval (ms)
 - **CSV logging** — save all received messages to a `.csv` file
-- **Dual backend support** — local SocketCAN hardware OR remote candump pipe over SSH
+- **Three CAN backends** — local SocketCAN, Waveshare USB-CAN-FD via its Windows API, or remote candump over SSH
 - **CAN scheme file** — load a CSV defining CAN IDs, descriptions, and per-byte meanings
 - **Watch List filtering** — tick individual CAN IDs to filter the message view in real time
 - **Byte-level info** — inspect individual bytes of a selected message with variable/function details
@@ -47,6 +49,7 @@ A **GTK# 3 desktop application** written in **C# (.NET 8)** for monitoring and s
 | **Language** | C# 12 (.NET 8) |
 | **GUI Framework** | GTK# 3 (GtkSharp 3.24) |
 | **CAN (local)** | Linux SocketCAN — raw socket P/Invoke (`AF_CAN`, `socket()`, `bind()`, `read()`, `write()`) |
+| **CAN (Waveshare)** | Windows `ControlCANFD.dll` bridge launched directly from WSL |
 | **CAN (remote)** | SSH pipe — parses `candump` stdout via regex |
 | **Build system** | .NET SDK (`dotnet build` / `dotnet run`) |
 | **Platform** | Linux (x64 / arm64) |
@@ -61,22 +64,17 @@ A **GTK# 3 desktop application** written in **C# (.NET 8)** for monitoring and s
                     │   GUI + Application Logic │
                     └──────────┬───────────────┘
                                │ ICanBackend
-                    ┌──────────┴───────────────┐
-                    │                          │
-          ┌────────┴────────┐    ┌────────────┴──────────┐
-          │   CanBackend     │    │ CandumpStdinBackend   │
-          │  (SocketCAN raw) │    │  (SSH candump pipe)   │
-          └────────┬────────┘    └───────────┬───────────┘
-                   │                         │
-          ┌────────┴────────┐     ┌──────────┴───────────┐
-          │   CanSocket.cs  │     │  stdin regex parser  │
-          │  P/Invoke libc   │     │  + ssh cansend       │
-          └────────┬────────┘     └──────────────────────┘
-                   │
-          ┌────────┴────────┐
-          │  Linux Kernel    │
-          │  AF_CAN sockets  │
-          └─────────────────┘
+             ┌─────────────────┼────────────────────┐
+             │                 │                    │
+     ┌───────┴────────┐ ┌──────┴──────────┐ ┌──────┴────────────┐
+     │   CanBackend    │ │ WaveshareWindows│ │CandumpStdinBackend│
+     │ (SocketCAN raw) │ │    Backend      │ │ (SSH/stdin pipe)  │
+     └───────┬────────┘ └──────┬──────────┘ └──────┬────────────┘
+             │                 │                    │
+     ┌───────┴────────┐ ┌──────┴──────────┐ ┌──────┴────────────┐
+     │ Linux AF_CAN   │ │ Windows vendor  │ │ candump parser +  │
+     │ sockets        │ │ API bridge      │ │ ssh cansend       │
+     └────────────────┘ └─────────────────┘ └───────────────────┘
 ```
 
 Supporting files:
@@ -91,6 +89,7 @@ Supporting files:
 - **.NET SDK 8.0** (or later)
 - **Linux** with either:
   - A CAN adapter and SocketCAN support, **or**
+  - WSL2 on Windows with the Waveshare USB-CAN-FD WinUSB driver and Windows .NET 8, **or**
   - SSH access to a machine running `candump` / `cansend`
 - **GTK 3 runtime** (usually pre-installed on desktop Linux):
   ```bash
@@ -111,6 +110,7 @@ You need a USB-to-CAN adapter. Well-supported options:
 | InnoMaker USB2CAN | `gs_usb` | ~$20 |
 | Peak PCAN-USB | `peak_usb` | ~$250 |
 | Kvaser Leaf Light | `kvaser_usb` | ~$300 |
+| Waveshare USB-CAN-FD | Windows WinUSB/vendor API bridge | — |
 
 ### Wiring
 
@@ -136,7 +136,7 @@ dmesg | tail -20
 ip link show
 
 # Bring it up at the desired bitrate
-sudo ip link set can0 up type can bitrate 500000
+sudo ip link set can0 up type can bitrate 125000
 
 # Verify
 ip -details link show can0
@@ -173,6 +173,10 @@ cd CanLogger
 # Restore NuGet packages
 dotnet restore
 
+# Required once for Waveshare USB-CAN-FD support. This downloads the official
+# x64 ControlCANFD.dll into the ignored local .vendor directory.
+./scripts/install-waveshare-api.sh
+
 # Build
 dotnet build
 
@@ -192,15 +196,40 @@ The `--stdin` flag switches to the `CandumpStdinBackend`, which parses `candump`
 ### Mode 1 — Local CAN Hardware
 
 1. Launch: `dotnet run`
-2. Enter your CAN interface name (e.g. `can0`, `vcan0`)
-3. Select the bitrate matching your bus
+2. Select a detected CAN interface (e.g. `can0`, `slcan0`, or `vcan0`), or enter its name manually. Use **Refresh** after plugging in an adapter.
+3. Select the bitrate matching your bus. `125000` is one of the available choices.
 4. Click **▶ Start**
 5. Incoming frames appear in the message table
-6. Use the **Send CAN Frame** panel to transmit frames
-7. Optionally start **Periodic** sending at a fixed interval
-8. Click **📄 Log to File** to save a CSV log
+6. Click a received frame to copy it into blue **Send CAN Frame 1**, Shift-click one for amber **Frame 2**, or Ctrl-click one for green **Frame 3**. Each source row remains highlighted in the matching colour, and each panel's Hex/Decimal toggle controls its copied format.
+7. Use any of the three **Send CAN Frame** panels to transmit independent messages.
+8. Optionally start **Periodic** sending at a fixed interval
+9. Click **📄 Log to File** to save a CSV log
 
-### Mode 2 — Remote CAN via SSH Pipe
+USB adapters supported by Linux SocketCAN do not need an adapter-specific option in
+the app: their kernel driver exposes them as a CAN network interface, normally
+`can0` or `can1`. The app applies the selected bitrate when Start is clicked. If the
+interface is already up at that bitrate, no elevated permission is needed. Changing
+the interface configuration requires root or `CAP_NET_ADMIN`; if that is unavailable,
+the app displays the equivalent `sudo ip link` commands to run once in a terminal.
+
+The bitrate control is disabled in `--stdin` mode because the CAN interface belongs
+to the remote machine and must be configured there.
+
+### Mode 2 — Waveshare USB-CAN-FD
+
+1. Install Waveshare's Windows driver and confirm Device Manager shows a healthy **WinUSB Device**.
+2. Close `CANFDToolPro`; the vendor API only permits the analyser to be opened once.
+3. Run `./scripts/install-waveshare-api.sh`, then `dotnet build`.
+4. Launch CanLogger in WSL with `dotnet run`.
+5. Select `waveshare-can1` or `waveshare-can2`, select `125000`, and click **Start**.
+
+The bridge accesses the device on Windows directly, so USB/IP attachment is not
+required. It initializes the analyser through its CAN-FD controller API and monitors
+both vendor receive queues, which is also required to receive ordinary CAN 2.0 frames
+on this model. Sending is currently limited to classic CAN frames up to 8 data bytes;
+a separate CAN-FD data-phase bitrate is not yet exposed in the UI.
+
+### Mode 3 — Remote CAN via SSH Pipe
 
 1. Launch: `ssh piZero candump can0 | dotnet run -- --stdin`
 2. Click **Start** — the app begins reading candump output from the SSH pipe
@@ -213,7 +242,7 @@ The `--stdin` flag switches to the `CandumpStdinBackend`, which parses `candump`
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  Interface: [can0]  Bitrate: [500000▼]  [▶ Start] [Clear]   │
+│  Interface: [can0▼] [Refresh]  Bitrate: [125000▼]  [▶ Start] [Clear] │
 │  [📄 Log to File]  [✓ Lock scroll]                          │
 ├──────────────────────┬───────────────────────────────────────┤
 │  Watch List          │  #  Timestamp   ID    DLC  Data ...  │
@@ -270,24 +299,19 @@ The app loads this file at startup and uses it to:
 
 ## Permissions
 
-By default, CAN interfaces require root. To allow your user:
+The app can normally open an interface that is already configured and up without
+running as root. Changing its bitrate or bringing it up requires Linux
+`CAP_NET_ADMIN`. The recommended setup is to configure it once in a terminal:
 
 ```bash
-# Add a can group and your user to it
-sudo groupadd can 2>/dev/null
-sudo usermod -a -G can $USER
-
-# Create a udev rule for CAN network interfaces
-echo 'SUBSYSTEM=="net", KERNEL=="can*", GROUP="can", MODE="0660"' \
-  | sudo tee /etc/udev/rules.d/50-can.rules
-
-# Reload
-sudo udevadm control --reload-rules
-sudo udevadm trigger
-
-# Log out and back in for the group to take effect
-newgrp can   # or reboot
+sudo ip link set dev can0 down
+sudo ip link set dev can0 type can bitrate 125000
+sudo ip link set dev can0 up
 ```
+
+After that, launch the app as your normal user and select `can0` / `125000`. If the
+app detects that the interface is already up at the selected bitrate, it does not
+run any privileged configuration command.
 
 ---
 
@@ -297,6 +321,9 @@ newgrp can   # or reboot
 |------|---------|
 | `Program.cs` | GTK# GUI — window layout, event handlers, main entry point |
 | `CanBackend.cs` | `ICanBackend` interface + SocketCAN backend (`CanBackend`) with background read loop |
+| `CanInterfaceManager.cs` | Detects SocketCAN interfaces and applies the selected local bitrate |
+| `WaveshareWindowsBackend.cs` | Runs and communicates with the Windows vendor-API bridge from WSL |
+| `WaveshareNative.cs` | Waveshare API declarations, Windows bridge loop, receive and transmit framing |
 | `CandumpStdinBackend.cs` | Stdin pipe backend — parses `candump` lines via regex, sends via `ssh cansend` |
 | `CanSocket.cs` | Low-level Linux SocketCAN P/Invoke (`AF_CAN` raw sockets — `socket`, `bind`, `read`, `write`) |
 | `CanMessage.cs` | Immutable `record` for a CAN frame (timestamp, ID, DLC, data, flags) |
@@ -312,9 +339,11 @@ newgrp can   # or reboot
 | Problem | Solution |
 |---------|----------|
 | `socket() failed` | Check that the CAN interface exists: `ip link show`. Load kernel module if needed: `sudo modprobe can`. |
-| `bind() failed` | The interface may not be up: `sudo ip link set can0 up type can bitrate 500000`. |
-| Permission denied | Follow the [Permissions](#permissions) setup above, or run with `sudo dotnet run`. |
+| `bind() failed` | The interface may not be up: `sudo ip link set can0 up type can bitrate 125000`. |
+| Permission denied while configuring | Run the three commands in [Permissions](#permissions), then launch the app normally. |
 | No frames appearing | Verify traffic exists: `candump can0` in another terminal. Check bitrate matches the bus. |
+| Waveshare cannot open | Close `CANFDToolPro`, confirm the WinUSB device is healthy, and rebuild after running `scripts/install-waveshare-api.sh`. |
+| Waveshare opens but receives 0 frames | Check the selected CAN1/CAN2 channel, connect H-to-H, L-to-L and GND, confirm 125 kbit/s and classic CAN mode, and check bus termination/activity. |
 | GTK errors on startup | Install GTK 3 runtime: `sudo apt install libgtk-3-0`. |
 | SSH pipe not working | Ensure `candump` is installed on the remote machine: `sudo apt install can-utils`. Test: `ssh piZero candump can0` (should show frames). |
 
@@ -323,4 +352,3 @@ newgrp can   # or reboot
 ## License
 
 This project is provided as-is for educational and personal use. Use responsibly with CAN hardware you own or are authorised to access.
-
