@@ -31,7 +31,7 @@ A **GTK# 3 desktop application** written in **C# (.NET 8)** for monitoring and s
 - **Three independent send frames** — configure and transmit three different messages, each with its own periodic timer
 - **Colour-coded click-to-reuse frames** — click, Shift-click, or Ctrl-click received rows to populate send frames 1, 2, or 3
 - **Periodic frame transmission** — send a frame repeatedly at a configurable interval (ms)
-- **CSV logging** — save all received messages to a `.csv` file
+- **CSV logging** — start and stop recording with a live filename, elapsed-time, and frame-count indicator
 - **Three CAN backends** — local SocketCAN, Waveshare USB-CAN-FD via its Windows API, or remote candump over SSH
 - **CAN scheme file** — load a CSV defining CAN IDs, descriptions, and per-byte meanings
 - **Watch List filtering** — tick individual CAN IDs to filter the message view in real time
@@ -205,6 +205,10 @@ The `--stdin` flag switches to the `CandumpStdinBackend`, which parses `candump`
 8. Optionally start **Periodic** sending at a fixed interval
 9. Click **📄 Log to File** to save a CSV log
 
+Logging remains active if the CAN stream is stopped or restarted, so one CSV can
+cover multiple capture sessions. Click **■ Stop Logging** to finish and close the
+file; closing the application also closes any active log safely.
+
 USB adapters supported by Linux SocketCAN do not need an adapter-specific option in
 the app: their kernel driver exposes them as a CAN network interface, normally
 `can0` or `can1`. The app applies the selected bitrate when Start is clicked. If the
@@ -259,7 +263,7 @@ a separate CAN-FD data-phase bitrate is not yet exposed in the UI.
 │  ID (hex): [7DF]  Data: [02 01 00...]  [☐ Extended ID]     │
 │  [Send]  │  Periodic (ms): [1000]  [Start Periodic]         │
 ├──────────────────────────────────────────────────────────────┤
-│  Connected — can0 (logging)              Messages: 1,234     │
+│  Connected — can0     ● RECORDING — can_log.csv — 1,234 frames │
 └──────────────────────────────────────────────────────────────┘
 ```
 

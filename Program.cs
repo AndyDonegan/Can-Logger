@@ -23,6 +23,7 @@ public class CanAnalyzerApp
     private Button _startStopBtn = null!;
     private Button _clearBtn = null!;
     private Button _logBtn = null!;
+    private Label _logStatusLabel = null!;
     private CheckButton _lockScrollCheck = null!;
     private readonly List<SendFrameControls> _sendFrames = new();
     private TreeView _watchTreeView = null!;
@@ -36,6 +37,10 @@ public class CanAnalyzerApp
     private int _messageCount;
     private bool _logEnabled;
     private StreamWriter? _logWriter;
+    private string? _logFilePath;
+    private DateTime _logStartedAtUtc;
+    private long _loggedFrameCount;
+    private uint _logStatusTimerId;
     private readonly object _logLock = new();
 
     private const int MaxLogRows = 2000;
@@ -121,7 +126,7 @@ public class CanAnalyzerApp
         win.SetDefaultSize(1300, 700);
         win.DeleteEvent += (_, _) =>
         {
-            StopAll();
+            StopAll(stopLogging: true);
             Application.Quit();
         };
 
@@ -199,6 +204,16 @@ public class CanAnalyzerApp
         _logBtn.Clicked += OnToggleLogging;
         controlBar.PackStart(_logBtn, false, false, 2);
 
+        _logStatusLabel = new Label
+        {
+            UseMarkup = true,
+            Xalign = 0,
+            Ellipsize = Pango.EllipsizeMode.Middle,
+            Markup = "<span foreground=\"#777777\">● Not logging</span>",
+        };
+        _logStatusLabel.SetSizeRequest(320, -1);
+        controlBar.PackStart(_logStatusLabel, true, true, 4);
+
         mainBox.PackStart(controlBar, false, false, 0);
 
         // -- Main area: watch list (left) | message table (right) -----------
@@ -215,8 +230,7 @@ public class CanAnalyzerApp
         _watchStore = new ListStore(
             typeof(bool),    // toggle
             typeof(uint),    // CAN ID (hidden)
-            typeof(string),  // ID (dec)
-            typeof(string),  // ID (hex)
+            typeof(string),  // ID (decimal and hex)
             typeof(string)   // Description
         );
 
@@ -226,7 +240,7 @@ public class CanAnalyzerApp
         {
             HeadersVisible = true,
             EnableSearch = true,
-            SearchColumn = 4, // Description
+            SearchColumn = 3, // Description
         };
 
         var wtToggle = new CellRendererToggle();
@@ -234,8 +248,8 @@ public class CanAnalyzerApp
         var wtCol = new TreeViewColumn("", wtToggle, "active", 0) { MinWidth = 30 };
         _watchTreeView.AppendColumn(wtCol);
 
-        AddWatchColumn("ID", 2, 45);
-        AddWatchColumn("Description", 4, 140);
+        AddWatchColumn("ID (dec - hex)", 2, 100);
+        AddWatchColumn("Description", 3, 140);
 
         var watchScroller = new ScrolledWindow { ShadowType = ShadowType.In };
         watchScroller.Add(_watchTreeView);
@@ -472,18 +486,28 @@ public class CanAnalyzerApp
         // Log to file if enabled
         if (_logEnabled && _logWriter != null)
         {
+            Exception? writeError = null;
             lock (_logLock)
             {
                 try
                 {
+                    long logRowNumber = _loggedFrameCount + 1;
                     _logWriter.WriteLine(
-                        $"{_messageCount},{ts},{idHex},{msg.Dlc},{dataHex},{frameType}");
-                    _logWriter.Flush();
+                        $"{logRowNumber},{ts},{idHex},{msg.Dlc},{dataHex},{frameType}");
+                    _loggedFrameCount++;
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // Silently stop logging on write error
+                    writeError = ex;
                 }
+            }
+
+            if (writeError != null)
+            {
+                string failedPath = _logFilePath ?? "the selected file";
+                StopLogging("Recording stopped because the log file could not be written.");
+                ShowError("Log Error",
+                    $"Logging to '{failedPath}' has stopped.\n\n{writeError.Message}");
             }
         }
 
@@ -523,6 +547,7 @@ public class CanAnalyzerApp
                 _statusLabel.Text = _stdinMode
                     ? $"Connected \u2014 {iface}"
                     : $"Connected \u2014 {iface} @ {bitrate} bit/s";
+                UpdateLoggingStatus();
             }
             catch (Exception ex)
             {
@@ -687,8 +712,7 @@ public class CanAnalyzerApp
             _watchStore.AppendValues(
                 _filterIds.Contains(def.Id),
                 def.Id,
-                def.IdDec,
-                def.IdHex,
+                $"{def.IdDec} - {def.IdHex}",
                 def.Description
             );
         }
@@ -849,29 +873,121 @@ public class CanAnalyzerApp
     {
         try
         {
-            _logWriter = new StreamWriter(path, append: false);
+            _logFilePath = Path.GetFullPath(path);
+            _logWriter = new StreamWriter(_logFilePath, append: false) { AutoFlush = true };
             _logWriter.WriteLine("#,Timestamp,ID (hex),DLC,Data (hex),Type");
+            _logStartedAtUtc = DateTime.UtcNow;
+            _loggedFrameCount = 0;
             _logEnabled = true;
-            _logBtn.Label = "\u23f9 Stop Logging";
+            _logBtn.Label = "■ Stop Logging";
+            _logBtn.StyleContext.AddClass("destructive-action");
+            StartLogStatusTimer();
+            UpdateLoggingStatus();
             UpdateStatus();
         }
         catch (Exception ex)
         {
+            lock (_logLock)
+            {
+                try { _logWriter?.Dispose(); }
+                catch (Exception) { }
+                _logWriter = null;
+            }
+            _logEnabled = false;
+            SetLoggingFailureStatus("Logging could not be started.");
             ShowError("Log Error", ex.Message);
         }
     }
 
-    private void StopLogging()
+    private void StopLogging(string? failureMessage = null)
     {
+        bool wasLogging = _logEnabled || _logWriter != null;
+        if (!wasLogging)
+            return;
+
         _logEnabled = false;
+        StopLogStatusTimer();
+        Exception? closeError = null;
         lock (_logLock)
         {
-            _logWriter?.Dispose();
+            try { _logWriter?.Dispose(); }
+            catch (Exception ex) { closeError = ex; }
             _logWriter = null;
         }
+
         _logBtn.Label = "\U0001f4c4 Log to File";
+        _logBtn.StyleContext.RemoveClass("destructive-action");
+        if (failureMessage != null || closeError != null)
+        {
+            string message = failureMessage ?? "Recording stopped while closing the log file.";
+            SetLoggingFailureStatus(message);
+        }
+        else
+        {
+            string fileName = Path.GetFileName(_logFilePath) ?? "log file";
+            string frameText = FormatFrameCount(_loggedFrameCount);
+            _logStatusLabel.Markup =
+                $"<span foreground=\"#2e7d32\">● Saved</span> — " +
+                $"{EscapeMarkup(fileName)} — {frameText}";
+            _logStatusLabel.TooltipText = _logFilePath ?? "";
+        }
         UpdateStatus();
     }
+
+    private void StartLogStatusTimer()
+    {
+        StopLogStatusTimer();
+        _logStatusTimerId = GLib.Timeout.Add(1000, () =>
+        {
+            if (!_logEnabled)
+            {
+                _logStatusTimerId = 0;
+                return false;
+            }
+
+            UpdateLoggingStatus();
+            return true;
+        });
+    }
+
+    private void StopLogStatusTimer()
+    {
+        if (_logStatusTimerId == 0)
+            return;
+
+        GLib.Source.Remove(_logStatusTimerId);
+        _logStatusTimerId = 0;
+    }
+
+    private void UpdateLoggingStatus()
+    {
+        if (!_logEnabled)
+            return;
+
+        string fileName = Path.GetFileName(_logFilePath) ?? "log file";
+        TimeSpan elapsed = DateTime.UtcNow - _logStartedAtUtc;
+        string elapsedText =
+            $"{(int)elapsed.TotalHours:00}:{elapsed.Minutes:00}:{elapsed.Seconds:00}";
+        _logStatusLabel.Markup =
+            $"<span foreground=\"#d32f2f\"><b>● RECORDING</b></span> — " +
+            $"{EscapeMarkup(fileName)} — {elapsedText} — {FormatFrameCount(_loggedFrameCount)}" +
+            (_backend.IsRunning ? "" : " — waiting for CAN");
+        _logStatusLabel.TooltipText = _logFilePath ?? "";
+    }
+
+    private void SetLoggingFailureStatus(string message)
+    {
+        _logStatusLabel.Markup =
+            $"<span foreground=\"#d32f2f\"><b>● Logging stopped</b></span> — " +
+            EscapeMarkup(message);
+        _logStatusLabel.TooltipText = _logFilePath ?? "";
+    }
+
+    private static string FormatFrameCount(long count) =>
+        $"{count:N0} {(count == 1 ? "frame" : "frames")}";
+
+    private static string EscapeMarkup(string value) =>
+        System.Security.SecurityElement.Escape(value) ?? "";
 
     private void ClearMessages()
     {
@@ -880,15 +996,17 @@ public class CanAnalyzerApp
         _msgCountLabel.Text = "Messages: 0";
     }
 
-    private void StopAll()
+    private void StopAll(bool stopLogging = false)
     {
         StopAllPeriodic();
-        StopLogging();
         _backend.Stop();
+        if (stopLogging)
+            StopLogging();
         _startStopBtn.Label = "\u25b6 Start";
         SetSendControlsSensitive(false);
         SetConnectionControlsSensitive(true);
         UpdateStatus();
+        UpdateLoggingStatus();
     }
 
     private void SetSendControlsSensitive(bool sensitive)
@@ -904,9 +1022,8 @@ public class CanAnalyzerApp
     {
         if (_backend.IsRunning)
         {
-            string extra = _logEnabled ? " (logging)" : "";
             string bitrate = _stdinMode ? "" : $" @ {GetSelectedBitrate()} bit/s";
-            _statusLabel.Text = $"Connected \u2014 {_backend.InterfaceName}{bitrate}{extra}";
+            _statusLabel.Text = $"Connected \u2014 {_backend.InterfaceName}{bitrate}";
         }
         else
         {
