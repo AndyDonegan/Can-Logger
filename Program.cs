@@ -82,6 +82,11 @@ public class CanAnalyzerApp
             Environment.ExitCode = WaveshareBridgeProgram.Run(args);
             return;
         }
+        if (args.Contains("--itek-bridge"))
+        {
+            Environment.ExitCode = ItekBridgeProgram.Run(args);
+            return;
+        }
 
         bool stdinMode = args.Contains("--stdin") || args.Contains("-s");
 
@@ -149,7 +154,7 @@ public class CanAnalyzerApp
         {
             RefreshCanInterfaces();
             _interfaceCombo.TooltipText =
-                "Detected SocketCAN interfaces and Waveshare USB-CAN-FD channels.";
+                "Detected SocketCAN, Waveshare USB-CAN-FD, and iTEK USBCAN interfaces.";
         }
         controlBar.PackStart(_interfaceCombo, false, false, 2);
 
@@ -538,7 +543,7 @@ public class CanAnalyzerApp
                 int bitrate = GetSelectedBitrate();
                 if (!_stdinMode)
                     SelectBackend(iface, bitrate);
-                if (!_stdinMode && !WaveshareWindowsBackend.IsWaveshareInterface(iface))
+                if (!_stdinMode && !IsWindowsVendorInterface(iface))
                     CanInterfaceManager.EnsureReady(iface, bitrate);
                 _backend.Start(iface);
                 _startStopBtn.Label = "\u23f9 Stop";
@@ -1039,6 +1044,7 @@ public class CanAnalyzerApp
         string current = _interfaceCombo.Entry.Text.Trim();
         var interfaces = CanInterfaceManager.GetCanInterfaces()
             .Concat(WaveshareWindowsBackend.GetAvailableInterfaces())
+            .Concat(ItekWindowsBackend.GetAvailableInterfaces())
             .Distinct(StringComparer.Ordinal)
             .ToList();
 
@@ -1068,9 +1074,14 @@ public class CanAnalyzerApp
 
     private void SelectBackend(string interfaceName, int bitrate)
     {
-        ICanBackend backend = WaveshareWindowsBackend.IsWaveshareInterface(interfaceName)
-            ? new WaveshareWindowsBackend(bitrate)
-            : new CanBackend();
+        ICanBackend backend = interfaceName switch
+        {
+            _ when WaveshareWindowsBackend.IsWaveshareInterface(interfaceName) =>
+                new WaveshareWindowsBackend(bitrate),
+            _ when ItekWindowsBackend.IsItekInterface(interfaceName) =>
+                new ItekWindowsBackend(bitrate),
+            _ => new CanBackend(),
+        };
 
         _backend.Stop();
         _backend.OnMessageReceived -= OnCanMessage;
@@ -1082,6 +1093,10 @@ public class CanAnalyzerApp
         _backend.OnMessageReceived += OnCanMessage;
         _backend.OnError += OnCanError;
     }
+
+    private static bool IsWindowsVendorInterface(string interfaceName) =>
+        WaveshareWindowsBackend.IsWaveshareInterface(interfaceName) ||
+        ItekWindowsBackend.IsItekInterface(interfaceName);
 
     private void SetConnectionControlsSensitive(bool sensitive)
     {

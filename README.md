@@ -1,6 +1,6 @@
 # CanLogger — CAN Bus Analyzer
 
-A **GTK# 3 desktop application** written in **C# (.NET 8)** for monitoring and sending CAN bus frames. It supports raw **Linux SocketCAN**, the Windows-only **Waveshare USB-CAN-FD** through a WSL-to-Windows bridge, and an **SSH pipe** from `candump` for remote CAN buses.
+A **GTK# 3 desktop application** written in **C# (.NET 8)** for monitoring and sending CAN bus frames. It supports raw **Linux SocketCAN**, Windows-only **Waveshare USB-CAN-FD** and **iTEK/E&J USBCAN-I** analysers through WSL-to-Windows bridges, and an **SSH pipe** from `candump` for remote CAN buses.
 
 ---
 
@@ -16,7 +16,8 @@ A **GTK# 3 desktop application** written in **C# (.NET 8)** for monitoring and s
 - [Usage](#usage)
   - [Mode 1 — Local CAN Hardware](#mode-1--local-can-hardware)
   - [Mode 2 — Waveshare USB-CAN-FD](#mode-2--waveshare-usb-can-fd)
-  - [Mode 3 — Remote CAN via SSH Pipe](#mode-3--remote-can-via-ssh-pipe)
+  - [Mode 3 — iTEK/E&J USBCAN-I](#mode-3--itekej-usbcan-i)
+  - [Mode 4 — Remote CAN via SSH Pipe](#mode-4--remote-can-via-ssh-pipe)
 - [GUI Walkthrough](#gui-walkthrough)
 - [CAN Scheme CSV](#can-scheme-csv)
 - [Permissions](#permissions)
@@ -32,7 +33,7 @@ A **GTK# 3 desktop application** written in **C# (.NET 8)** for monitoring and s
 - **Colour-coded click-to-reuse frames** — click, Shift-click, or Ctrl-click received rows to populate send frames 1, 2, or 3
 - **Periodic frame transmission** — send a frame repeatedly at a configurable interval (ms)
 - **CSV logging** — start and stop recording with a live filename, elapsed-time, and frame-count indicator
-- **Three CAN backends** — local SocketCAN, Waveshare USB-CAN-FD via its Windows API, or remote candump over SSH
+- **Four CAN backends** — local SocketCAN, Waveshare USB-CAN-FD, iTEK/E&J USBCAN-I, or remote candump over SSH
 - **CAN scheme file** — load a CSV defining CAN IDs, descriptions, and per-byte meanings
 - **Watch List filtering** — tick individual CAN IDs to filter the message view in real time
 - **Byte-level info** — inspect individual bytes of a selected message with variable/function details
@@ -50,6 +51,7 @@ A **GTK# 3 desktop application** written in **C# (.NET 8)** for monitoring and s
 | **GUI Framework** | GTK# 3 (GtkSharp 3.24) |
 | **CAN (local)** | Linux SocketCAN — raw socket P/Invoke (`AF_CAN`, `socket()`, `bind()`, `read()`, `write()`) |
 | **CAN (Waveshare)** | Windows `ControlCANFD.dll` bridge launched directly from WSL |
+| **CAN (iTEK/E&J)** | Windows iTEK `usbcan.dll` bridge launched directly from WSL |
 | **CAN (remote)** | SSH pipe — parses `candump` stdout via regex |
 | **Build system** | .NET SDK (`dotnet build` / `dotnet run`) |
 | **Platform** | Linux (x64 / arm64) |
@@ -59,22 +61,22 @@ A **GTK# 3 desktop application** written in **C# (.NET 8)** for monitoring and s
 ## Architecture
 
 ```
-                    ┌──────────────────────────┐
-                    │     Program.cs (GTK#)     │
-                    │   GUI + Application Logic │
-                    └──────────┬───────────────┘
+                  ┌──────────────────────────┐
+                  │     Program.cs (GTK#)    │
+                  │  GUI + application logic │
+                  └────────────┬─────────────┘
                                │ ICanBackend
-             ┌─────────────────┼────────────────────┐
-             │                 │                    │
-     ┌───────┴────────┐ ┌──────┴──────────┐ ┌──────┴────────────┐
-     │   CanBackend    │ │ WaveshareWindows│ │CandumpStdinBackend│
-     │ (SocketCAN raw) │ │    Backend      │ │ (SSH/stdin pipe)  │
-     └───────┬────────┘ └──────┬──────────┘ └──────┬────────────┘
-             │                 │                    │
-     ┌───────┴────────┐ ┌──────┴──────────┐ ┌──────┴────────────┐
-     │ Linux AF_CAN   │ │ Windows vendor  │ │ candump parser +  │
-     │ sockets        │ │ API bridge      │ │ ssh cansend       │
-     └────────────────┘ └─────────────────┘ └───────────────────┘
+             ┌─────────────────┼─────────────────┬──────────────────┐
+             │                 │                 │                  │
+      ┌──────┴──────┐  ┌───────┴───────┐  ┌──────┴──────┐  ┌──────┴──────┐
+      │ CanBackend  │  │ Waveshare     │  │ iTEK        │  │ Candump     │
+      │ SocketCAN   │  │ Windows bridge│  │ Windows     │  │ stdin/SSH   │
+      └──────┬──────┘  └───────┬───────┘  │ bridge      │  └──────┬──────┘
+             │                 │          └──────┬──────┘         │
+      ┌──────┴──────┐  ┌───────┴───────┐  ┌──────┴──────┐  ┌──────┴──────┐
+      │ Linux       │  │ ControlCANFD  │  │ iTEK       │  │ candump /   │
+      │ AF_CAN      │  │ vendor API    │  │ usbcan.dll │  │ cansend     │
+      └─────────────┘  └───────────────┘  └─────────────┘  └─────────────┘
 ```
 
 Supporting files:
@@ -89,7 +91,7 @@ Supporting files:
 - **.NET SDK 8.0** (or later)
 - **Linux** with either:
   - A CAN adapter and SocketCAN support, **or**
-  - WSL2 on Windows with the Waveshare USB-CAN-FD WinUSB driver and Windows .NET 8, **or**
+  - WSL2 on Windows with a supported analyser's Windows driver and Windows .NET 8, **or**
   - SSH access to a machine running `candump` / `cansend`
 - **GTK 3 runtime** (usually pre-installed on desktop Linux):
   ```bash
@@ -111,6 +113,7 @@ You need a USB-to-CAN adapter. Well-supported options:
 | Peak PCAN-USB | `peak_usb` | ~$250 |
 | Kvaser Leaf Light | `kvaser_usb` | ~$300 |
 | Waveshare USB-CAN-FD | Windows WinUSB/vendor API bridge | — |
+| iTEK/E&J USBCAN-I (including C+) | Windows iTEK WinUSB/API bridge | — |
 
 ### Wiring
 
@@ -177,6 +180,10 @@ dotnet restore
 # x64 ControlCANFD.dll into the ignored local .vendor directory.
 ./scripts/install-waveshare-api.sh
 
+# Required once for iTEK/E&J USBCAN-I support. This retrieves the official
+# 64-bit USBCAN API from iTEK's development package.
+./scripts/install-itek-api.sh
+
 # Build
 dotnet build
 
@@ -233,7 +240,20 @@ both vendor receive queues, which is also required to receive ordinary CAN 2.0 f
 on this model. Sending is currently limited to classic CAN frames up to 8 data bytes;
 a separate CAN-FD data-phase bitrate is not yet exposed in the UI.
 
-### Mode 3 — Remote CAN via SSH Pipe
+### Mode 3 — iTEK/E&J USBCAN-I
+
+1. Install the iTEK WinUSB driver and confirm Device Manager shows a healthy **iTEK USBCAN**.
+2. Close CANalyst or any other program using the analyser; only one application can open it at a time.
+3. Run `./scripts/install-itek-api.sh`, then `dotnet build`.
+4. Launch CanLogger in WSL with `dotnet run`.
+5. Select `itek-usbcan`, select `125000`, and click **Start**.
+
+This backend supports the single classic CAN channel on USBCAN-I and USBCAN-I(C+),
+including standard and extended frames up to 8 data bytes. The bridge calls iTEK's
+64-bit USBCAN transport directly because the generic `ControlCAN.dll` router supplied
+in the vendor sample package failed device discovery in the WSL bridge environment.
+
+### Mode 4 — Remote CAN via SSH Pipe
 
 1. Launch: `ssh piZero candump can0 | dotnet run -- --stdin`
 2. Click **Start** — the app begins reading candump output from the SSH pipe
@@ -328,6 +348,8 @@ run any privileged configuration command.
 | `CanInterfaceManager.cs` | Detects SocketCAN interfaces and applies the selected local bitrate |
 | `WaveshareWindowsBackend.cs` | Runs and communicates with the Windows vendor-API bridge from WSL |
 | `WaveshareNative.cs` | Waveshare API declarations, Windows bridge loop, receive and transmit framing |
+| `ItekWindowsBackend.cs` | Runs and communicates with the Windows iTEK USBCAN bridge from WSL |
+| `ItekNative.cs` | iTEK API declarations, bitrate mapping, and bridge receive/transmit loop |
 | `CandumpStdinBackend.cs` | Stdin pipe backend — parses `candump` lines via regex, sends via `ssh cansend` |
 | `CanSocket.cs` | Low-level Linux SocketCAN P/Invoke (`AF_CAN` raw sockets — `socket`, `bind`, `read`, `write`) |
 | `CanMessage.cs` | Immutable `record` for a CAN frame (timestamp, ID, DLC, data, flags) |
@@ -335,6 +357,7 @@ run any privileged configuration command.
 | `CanSchemeDialog.cs` | Watch List panel widget + Info dialog with per-byte details |
 | `can-scheme.csv` | CAN ID definitions shipped with the application |
 | `CanLogger.csproj` | .NET 8 project file with GtkSharp NuGet reference |
+| `scripts/install-itek-api.sh` | Downloads and verifies the official 64-bit iTEK USBCAN API |
 
 ---
 
@@ -348,6 +371,9 @@ run any privileged configuration command.
 | No frames appearing | Verify traffic exists: `candump can0` in another terminal. Check bitrate matches the bus. |
 | Waveshare cannot open | Close `CANFDToolPro`, confirm the WinUSB device is healthy, and rebuild after running `scripts/install-waveshare-api.sh`. |
 | Waveshare opens but receives 0 frames | Check the selected CAN1/CAN2 channel, connect H-to-H, L-to-L and GND, confirm 125 kbit/s and classic CAN mode, and check bus termination/activity. |
+| `itek-usbcan` is not listed | Run `scripts/install-itek-api.sh`, rebuild, and click **Refresh**. |
+| iTEK cannot open | Close CANalyst/other CAN tools and confirm Device Manager shows `iTEK USBCAN` without a warning icon. |
+| iTEK opens but receives 0 frames | Confirm 125 kbit/s, CAN-H/CAN-L/GND wiring, bus activity and termination. On C+ units the CAN LED is solid green when the channel has started and flashes green with traffic. |
 | GTK errors on startup | Install GTK 3 runtime: `sudo apt install libgtk-3-0`. |
 | SSH pipe not working | Ensure `candump` is installed on the remote machine: `sudo apt install can-utils`. Test: `ssh piZero candump can0` (should show frames). |
 

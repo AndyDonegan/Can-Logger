@@ -20,6 +20,10 @@
           Link="ControlCANFD.dll"
           CopyToOutputDirectory="PreserveNewest"
           Condition="Exists('.vendor/waveshare/ControlCANFD.dll')" />
+    <None Include=".vendor/itek/kerneldlls/usbcan.dll"
+          Link="kerneldlls/usbcan.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          Condition="Exists('.vendor/itek/kerneldlls/usbcan.dll')" />
   </ItemGroup>
 
 </Project>
