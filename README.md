@@ -303,7 +303,19 @@ in the vendor sample package failed device discovery in the WSL bridge environme
 
 ## CAN Scheme CSV
 
-The file `can-scheme.csv` defines CAN IDs, their descriptions, and per-byte meanings. Format:
+The file `can-scheme.csv` defines CAN IDs, their descriptions, and per-byte meanings.
+The current data was converted from the `Data` sheet in `CAN Bus Scheme 23-09-26.xlsx`.
+To regenerate it (Python 3, no additional packages):
+
+```bash
+python3 scripts/convert-can-scheme.py "CAN Bus Scheme 23-09-26.xlsx" can-scheme.csv
+```
+
+The export retains all 498 definition rows across 64 IDs, including 32 populated
+History cells. ID 76 has one definition for each byte (0–7). Quoted multiline
+fields are preserved and supported by the loader.
+
+Format:
 
 | Column | Description |
 |--------|-------------|
@@ -313,6 +325,7 @@ The file `can-scheme.csv` defines CAN IDs, their descriptions, and per-byte mean
 | `Variable` | Name of the variable at this byte position |
 | `Function` | What this byte controls/represents |
 | `Options` | Enumeration of possible values |
+| `History` | Source history text, shown at the bottom of hover tooltips and Info dialogs when present, labelled by byte |
 
 The app loads this file at startup and uses it to:
 - Populate the **Watch List** with all known IDs

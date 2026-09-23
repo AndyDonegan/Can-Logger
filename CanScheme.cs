@@ -1,4 +1,5 @@
 using System.Text;
+using Microsoft.VisualBasic.FileIO;
 
 namespace CanLogger;
 
@@ -11,6 +12,7 @@ public class ByteDef
     public string Variable { get; init; } = "";
     public string Function { get; init; } = "";
     public string Options { get; init; } = "";
+    public string History { get; init; } = "";
 }
 
 /// <summary>
@@ -41,21 +43,24 @@ public static class CanScheme
 
     /// <summary>
     /// Load scheme from a CSV file with columns:
-    /// CanID, Description, Bit, Variable, Function, Options, ...
+    /// CanID, Description, Bit, Variable, Function, Options, History (optional), ...
     /// </summary>
     public static void Load(string path)
     {
         var temp = new Dictionary<uint, CanIdDef>();
 
-        foreach (string line in File.ReadLines(path, Encoding.UTF8))
+        // Read CSV records, not physical lines: quoted Options/History can span lines.
+        using var parser = new TextFieldParser(path, Encoding.UTF8)
         {
-            if (string.IsNullOrWhiteSpace(line)) continue;
-
-            // Skip BOM on first line if present
-            string trimmed = line.TrimStart('\uFEFF');
-
-            string[] cols = SplitCsvLine(trimmed);
-            if (cols.Length < 6) continue;
+            TextFieldType = FieldType.Delimited,
+            HasFieldsEnclosedInQuotes = true,
+            TrimWhiteSpace = false,
+        };
+        parser.SetDelimiters(",");
+        while (!parser.EndOfData)
+        {
+            string[]? cols = parser.ReadFields();
+            if (cols == null || cols.Length < 6) continue;
 
             if (!uint.TryParse(cols[0].Trim(), out uint id)) continue;
             if (!int.TryParse(cols[2].Trim(), out int byteIdx)) continue;
@@ -76,6 +81,7 @@ public static class CanScheme
                 Variable = cols[3].Trim(),
                 Function = cols[4].Trim(),
                 Options = cols.Length > 5 ? cols[5].Trim() : "",
+                History = cols.Length > 6 ? cols[6].Trim() : "",
             });
         }
 
@@ -117,6 +123,7 @@ public static class CanScheme
             sb.AppendLine();
         }
 
+        AppendHistory(sb, def);
         return sb.ToString().TrimEnd();
     }
 
@@ -139,59 +146,27 @@ public static class CanScheme
             sb.AppendLine();
         }
 
+        AppendHistory(sb, def);
         return sb.ToString().TrimEnd();
     }
 
-    /// <summary>
-    /// Simple CSV line splitter that handles quoted fields (no embedded
-    /// quotes expected in this file, but we handle them anyway).
-    /// </summary>
-    private static string[] SplitCsvLine(string line)
+    private static void AppendHistory(StringBuilder sb, CanIdDef def)
     {
-        var result = new List<string>();
-        bool inQuotes = false;
-        var current = new StringBuilder();
-
-        for (int i = 0; i < line.Length; i++)
+        bool headingAdded = false;
+        foreach (var b in def.Bytes)
         {
-            char c = line[i];
-            if (inQuotes)
+            if (string.IsNullOrWhiteSpace(b.History)) continue;
+            if (!headingAdded)
             {
-                if (c == '"')
-                {
-                    if (i + 1 < line.Length && line[i + 1] == '"')
-                    {
-                        current.Append('"');
-                        i++;
-                    }
-                    else
-                    {
-                        inQuotes = false;
-                    }
-                }
-                else
-                {
-                    current.Append(c);
-                }
+                sb.AppendLine();
+                sb.AppendLine("History:");
+                headingAdded = true;
             }
-            else
-            {
-                if (c == '"')
-                {
-                    inQuotes = true;
-                }
-                else if (c == ',')
-                {
-                    result.Add(current.ToString());
-                    current.Clear();
-                }
-                else
-                {
-                    current.Append(c);
-                }
-            }
+            sb.Append($"  Byte {b.ByteIndex}");
+            if (!string.IsNullOrEmpty(b.Variable))
+                sb.Append($" — {b.Variable}");
+            sb.AppendLine($": {b.History}");
         }
-        result.Add(current.ToString());
-        return result.ToArray();
     }
+
 }

@@ -461,22 +461,24 @@ public class CanAnalyzerApp
 
     private void OnTreeViewQueryTooltip(object o, QueryTooltipArgs args)
     {
+        args.RetVal = false;
         if (!CanScheme.IsLoaded) return;
 
-        if (_treeView.GetPathAtPos(args.X, args.Y, out var path, out _))
-        {
-            if (_messageStore.GetIter(out var iter, path))
-            {
-                // IdDec column stores the arbitration ID as int
-                uint id = (uint)(int)_messageStore.GetValue(iter, (int)Col.IdDec);
-                string tip = CanScheme.GetTooltipText(id);
-                if (!string.IsNullOrEmpty(tip))
-                {
-                    args.Tooltip.Text = tip;
-                    args.RetVal = true;
-                }
-            }
-        }
+        // Tooltip coordinates are widget-relative; GTK resolves the row while
+        // accounting for the header, scrolling, and keyboard-triggered tooltips.
+        int x = args.X;
+        int y = args.Y;
+        if (!_treeView.GetTooltipContext(ref x, ref y, args.KeyboardTooltip,
+                out var model, out var path, out var iter))
+            return;
+
+        uint id = (uint)(int)model.GetValue(iter, (int)Col.IdDec);
+        string tip = CanScheme.GetTooltipText(id);
+        if (string.IsNullOrEmpty(tip)) return;
+
+        args.Tooltip.Text = tip;
+        _treeView.SetTooltipRow(args.Tooltip, path);
+        args.RetVal = true;
     }
 
     private void OnCanError(string error)
