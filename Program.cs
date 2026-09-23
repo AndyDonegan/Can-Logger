@@ -28,7 +28,10 @@ public class CanAnalyzerApp
     private readonly List<SendFrameControls> _sendFrames = new();
     private TreeView _watchTreeView = null!;
     private ListStore _watchStore = null!;
-    private HashSet<uint> _filterIds = new();
+    // Published snapshots are never mutated: the receive thread reads this set.
+    private volatile HashSet<uint> _filterIds = new();
+    private Entry _watchIdEntry = null!;
+    private Label _watchIdError = null!;
 
     private Label _statusLabel = null!;
     private Label _msgCountLabel = null!;
@@ -231,6 +234,24 @@ public class CanAnalyzerApp
         var watchHeader = new Label("<b>Watch List</b>") { UseMarkup = true, Margin = 4 };
         watchPanel.PackStart(watchHeader, false, false, 0);
 
+        watchPanel.PackStart(new Label("Add ID to watch list") { Xalign = 0, Margin = 4 }, false, false, 0);
+        var addWatchBox = new Box(Orientation.Horizontal, 4) { Margin = 4 };
+        _watchIdEntry = new Entry
+        {
+            PlaceholderText = "123 or 0x7AB",
+            WidthChars = 14,
+            TooltipText = "Decimal, or hexadecimal with a 0x prefix (0–0x1FFFFFFF). Session only.",
+        };
+        var addWatchBtn = new Button("Add");
+        addWatchBtn.Clicked += (_, _) => AddWatchId();
+        _watchIdEntry.Activated += (_, _) => AddWatchId();
+        addWatchBox.PackStart(_watchIdEntry, true, true, 0);
+        addWatchBox.PackStart(addWatchBtn, false, false, 0);
+        watchPanel.PackStart(addWatchBox, false, false, 0);
+        _watchIdError = new Label { Xalign = 0, Wrap = true, Margin = 4, NoShowAll = true };
+        _watchIdEntry.Changed += (_, _) => _watchIdError.Hide();
+        watchPanel.PackStart(_watchIdError, false, false, 0);
+
         // Watch list TreeView
         _watchStore = new ListStore(
             typeof(bool),    // toggle
@@ -426,7 +447,8 @@ public class CanAnalyzerApp
     private void OnCanMessage(CanMessage msg)
     {
         // Filter: skip if watch list is active and ID doesn't match
-        if (_filterIds.Count > 0 && !_filterIds.Contains(msg.ArbitrationId))
+        var filterIds = _filterIds;
+        if (filterIds.Count > 0 && !filterIds.Contains(msg.ArbitrationId))
             return;
 
         // Marshal to GTK main thread
@@ -723,6 +745,47 @@ public class CanAnalyzerApp
         }
     }
 
+    private static bool TryParseWatchId(string text, out uint id)
+    {
+        text = text.Trim();
+        bool hex = text.StartsWith("0x", StringComparison.OrdinalIgnoreCase);
+        return uint.TryParse(hex ? text[2..] : text,
+            hex ? System.Globalization.NumberStyles.AllowHexSpecifier : System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture, out id) && id <= 0x1FFFFFFF;
+    }
+
+    private void AddWatchId()
+    {
+        if (!TryParseWatchId(_watchIdEntry.Text, out uint id))
+        {
+            _watchIdError.Text = "Enter 0–536870911 (hex: 0x0–0x1FFFFFFF).";
+            _watchIdError.Show();
+            return;
+        }
+
+        TreeIter match = default;
+        bool found = false;
+        _watchStore.Foreach((model, path, iter) =>
+        {
+            if ((uint)model.GetValue(iter, 1) != id) return false;
+            match = iter;
+            found = true;
+            return true;
+        });
+        if (found)
+            _watchStore.SetValue(match, 0, true);
+        else
+            match = _watchStore.AppendValues(true, id, $"{id} - 0x{id:X3}", "Ad-hoc (session only)");
+
+        _filterIds = new HashSet<uint>(_filterIds) { id };
+        var rowPath = _watchStore.GetPath(match);
+        _watchTreeView.SetCursor(rowPath, null, false);
+        _watchTreeView.ScrollToCell(rowPath, null, true, 0.5f, 0);
+        _watchIdEntry.Text = "";
+        _watchIdError.Hide();
+        _watchIdEntry.GrabFocus();
+    }
+
     private void OnWatchToggled(object o, ToggledArgs args)
     {
         if (_watchStore.GetIter(out var iter, new TreePath(args.Path)))
@@ -731,23 +794,26 @@ public class CanAnalyzerApp
             _watchStore.SetValue(iter, 0, !current);
             uint id = (uint)_watchStore.GetValue(iter, 1);
 
+            var selectedIds = new HashSet<uint>(_filterIds);
             if (!current)
-                _filterIds.Add(id);
+                selectedIds.Add(id);
             else
-                _filterIds.Remove(id);
+                selectedIds.Remove(id);
+            _filterIds = selectedIds;
         }
     }
 
     private void SetWatchAll(bool selected)
     {
-        _filterIds.Clear();
+        var selectedIds = new HashSet<uint>();
         _watchStore.Foreach((model, path, iter) =>
         {
             uint id = (uint)_watchStore.GetValue(iter, 1);
             _watchStore.SetValue(iter, 0, selected);
-            if (selected) _filterIds.Add(id);
+            if (selected) selectedIds.Add(id);
             return false;
         });
+        _filterIds = selectedIds;
     }
 
     private void OnWatchInfo(object? sender, EventArgs e)

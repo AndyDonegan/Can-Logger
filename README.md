@@ -291,7 +291,8 @@ in the vendor sample package failed device discovery in the WSL bridge environme
 
 | Control | Action |
 |---------|--------|
-| **Watch List** | Tick/untick CAN IDs to filter the message table. Only ticked IDs are shown. |
+| **Watch List** | Tick/untick CAN IDs to filter incoming messages. Only ticked IDs are shown; with no IDs ticked, all IDs are shown. Existing displayed rows are retained. |
+| **Add ID to watch list** | Enter a decimal ID (e.g. `1963`) or hexadecimal with a `0x` prefix (e.g. `0x7AB`), then click **Add** or press Enter. The ID appears ticked and can be unticked normally. Adding an existing ID ticks its existing row. Standard and extended IDs up to `0x1FFFFFFF` are accepted. Ad-hoc rows last for this session and do not change `can-scheme.csv`. |
 | **All / None** | Select or clear all IDs in the watch list. |
 | **Info** | Select a message row and click Info for a per-byte breakdown. |
 | **Lock scroll** | Freezes the table scroll position so you can inspect older messages. |
