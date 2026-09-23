@@ -330,7 +330,7 @@ Format:
 The app loads this file at startup and uses it to:
 - Populate the **Watch List** with all known IDs
 - Show a **Description** column in the message table
-- Provide **byte-level tooltips** on hover
+- Provide **byte-level tooltips**, including History when present, on hover in both the message table and Watch List; popups shift inward only when they would cross the current screen’s usable edge
 - Power the **Info** dialog for detailed inspection
 
 ---

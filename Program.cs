@@ -267,7 +267,9 @@ public class CanAnalyzerApp
             HeadersVisible = true,
             EnableSearch = true,
             SearchColumn = 3, // Description
+            HasTooltip = true,
         };
+        _watchTreeView.QueryTooltip += (_, args) => ShowCanTooltip(_watchTreeView, args, 1);
 
         var wtToggle = new CellRendererToggle();
         wtToggle.Toggled += OnWatchToggled;
@@ -459,7 +461,10 @@ public class CanAnalyzerApp
         });
     }
 
-    private void OnTreeViewQueryTooltip(object o, QueryTooltipArgs args)
+    private void OnTreeViewQueryTooltip(object o, QueryTooltipArgs args) =>
+        ShowCanTooltip(_treeView, args, (int)Col.IdDec);
+
+    private static void ShowCanTooltip(TreeView treeView, QueryTooltipArgs args, int idColumn)
     {
         args.RetVal = false;
         if (!CanScheme.IsLoaded) return;
@@ -468,17 +473,63 @@ public class CanAnalyzerApp
         // accounting for the header, scrolling, and keyboard-triggered tooltips.
         int x = args.X;
         int y = args.Y;
-        if (!_treeView.GetTooltipContext(ref x, ref y, args.KeyboardTooltip,
+        if (!treeView.GetTooltipContext(ref x, ref y, args.KeyboardTooltip,
                 out var model, out var path, out var iter))
             return;
 
-        uint id = (uint)(int)model.GetValue(iter, (int)Col.IdDec);
+        uint id = Convert.ToUInt32(model.GetValue(iter, idColumn));
         string tip = CanScheme.GetTooltipText(id);
         if (string.IsNullOrEmpty(tip)) return;
 
-        args.Tooltip.Text = tip;
-        _treeView.SetTooltipRow(args.Tooltip, path);
+        int anchorX = args.KeyboardTooltip ? treeView.AllocatedWidth / 2 : args.X;
+        int anchorY = args.KeyboardTooltip ? treeView.AllocatedHeight / 2 : args.Y;
+        treeView.TranslateCoordinates(treeView.Toplevel, anchorX, anchorY,
+            out int parentX, out int parentY);
+        var monitor = treeView.Display.GetMonitorAtWindow(treeView.Toplevel.Window);
+        var workarea = monitor?.Workarea ?? new Gdk.Rectangle(
+            0, 0, treeView.Toplevel.AllocatedWidth, treeView.Toplevel.AllocatedHeight);
+        if ((treeView.Toplevel.Window.State & (Gdk.WindowState.Maximized | Gdk.WindowState.Fullscreen)) != 0)
+        {
+            workarea.Width = Math.Min(workarea.Width, treeView.Toplevel.AllocatedWidth);
+            workarea.Height = Math.Min(workarea.Height, treeView.Toplevel.AllocatedHeight);
+        }
+        if (treeView.TooltipWindow is not CanTooltipWindow popup)
+        {
+            popup = new CanTooltipWindow { TransientFor = treeView.Toplevel as Window };
+            treeView.TooltipWindow = popup;
+            treeView.Destroyed += (_, _) => popup.Destroy();
+        }
+        popup.SetContent(CreateCanTooltipLabel(tip, workarea), new Gdk.Point(parentX, parentY));
+        treeView.SetTooltipRow(args.Tooltip, path);
         args.RetVal = true;
+    }
+
+    private static Label CreateCanTooltipLabel(string text, Gdk.Rectangle workarea)
+    {
+        // Leave room for the tooltip border and desktop edges. Wrapping also
+        // prevents a long Options/History line from forcing the popup off-screen.
+        int maxWidth = Math.Max(1, workarea.Width - 64);
+        int width = Math.Min(720, maxWidth);
+        var label = new Label
+        {
+            Text = text,
+            Wrap = true,
+            LineWrapMode = Pango.WrapMode.WordChar,
+            MaxWidthChars = 1,
+            WidthRequest = width,
+            Xalign = 0,
+            Yalign = 0,
+        };
+        label.Show();
+        label.GetPreferredHeightForWidth(width, out _, out int height);
+        // Use more horizontal space if a long definition would exceed the height.
+        while (height > workarea.Height - 64 && width < maxWidth)
+        {
+            width = Math.Min(width + 120, maxWidth);
+            label.WidthRequest = width;
+            label.GetPreferredHeightForWidth(width, out _, out height);
+        }
+        return label;
     }
 
     private void OnCanError(string error)
