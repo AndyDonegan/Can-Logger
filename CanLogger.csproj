@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <Compile Remove="tests/**/*.cs" />
+    <EmbeddedResource Include="lin/ec600-lin-scheme.json" LogicalName="CanLogger.ec600-lin-scheme.json" />
   </ItemGroup>
 
   <ItemGroup>

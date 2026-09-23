@@ -396,3 +396,19 @@ run any privileged configuration command.
 ## License
 
 This project is provided as-is for educational and personal use. Use responsibly with CAN hardware you own or are authorised to access.
+
+## LIN receive test
+
+A separate **LIN data** tab supports the Microchip USB LIN analyzer
+through a portable Windows helper, alongside the existing CAN connection.
+For the EC600, leave **Initial baud** at **19600**, then press **Start LIN**.
+See [LIN setup and first test](docs/LIN-RECEIVE-TEST.md).
+The **EC600 LIN reference** button opens the ID table and source-backed byte/bit
+layouts. Hover over a received row for details; double-click for a scrollable
+inspection. **Hover layout** defaults to automatic heater selection from received
+CAN 133 byte 2 (2=Truma CP+, 3=Whale, 4=Eberspacher), with manual overrides.
+Alde generation and conflicting setting 5 remain manual. Selection is reported
+configuration, not proof that a heater is connected; no commands are sent.
+See the [full EC600 LIN reference](docs/EC600-LIN-REFERENCE.md) or
+[CSV ID table](docs/EC600-LIN-IDS.csv).
+LIN watch-list integration, logging and sending remain planned.

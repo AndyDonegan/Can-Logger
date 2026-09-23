@@ -15,6 +15,8 @@ public class CanAnalyzerApp
     private ListStore _messageStore = null!;
     private TreeView _treeView = null!;
     private Window _window = null!;
+    private LinReceivePanel? _linPanel;
+    private int _canConfigurationGeneration;
 
     // Controls
     private ComboBoxText _interfaceCombo = null!;
@@ -126,7 +128,7 @@ public class CanAnalyzerApp
     // ------------------------------------------------------------------
     private Window BuildWindow()
     {
-        var win = new Window("CAN Bus Analyzer")
+        var win = new Window("CAN / LIN Bus Analyzer")
         {
             Resizable = true,
             TypeHint = Gdk.WindowTypeHint.Normal,
@@ -134,6 +136,7 @@ public class CanAnalyzerApp
         win.SetDefaultSize(1300, 700);
         win.DeleteEvent += (_, _) =>
         {
+            _linPanel?.Close();
             StopAll(stopLogging: true);
             Application.Quit();
         };
@@ -208,7 +211,7 @@ public class CanAnalyzerApp
 
         controlBar.PackStart(new Separator(Orientation.Vertical), false, false, 4);
 
-        _logBtn = new Button("\U0001f4c4 Log to File");
+        _logBtn = new Button("\U0001f4c4 Log CAN to File");
         _logBtn.Clicked += OnToggleLogging;
         controlBar.PackStart(_logBtn, false, false, 2);
 
@@ -223,6 +226,8 @@ public class CanAnalyzerApp
         controlBar.PackStart(_logStatusLabel, true, true, 4);
 
         mainBox.PackStart(controlBar, false, false, 0);
+        _linPanel = new LinReceivePanel();
+        mainBox.PackStart(_linPanel.ConnectionControls, false, false, 0);
 
         // -- Main area: watch list (left) | message table (right) -----------
         var paned = new Paned(Orientation.Horizontal) { Position = 260 };
@@ -344,7 +349,11 @@ public class CanAnalyzerApp
         scrolledWindow.Add(_treeView);
         paned.Pack2(scrolledWindow, true, true);
 
-        mainBox.PackStart(paned, true, true, 5);
+        var busTabs = new Notebook { ShowTabs = true };
+        busTabs.AppendPage(paned, new Label("CAN"));
+        busTabs.AppendPage(_linPanel, new Label("LIN data"));
+        _linPanel.ShowDataRequested += () => busTabs.CurrentPage = 1;
+        mainBox.PackStart(busTabs, true, true, 5);
 
         // -- Send frame panels ----------------------------------------------
         var sendFramesBox = new Box(Orientation.Vertical, 2);
@@ -448,6 +457,15 @@ public class CanAnalyzerApp
     // ------------------------------------------------------------------
     private void OnCanMessage(CanMessage msg)
     {
+        // Observe reported PSU settings even when the CAN watch list hides ID 133.
+        if (LinHeaterConfiguration.FromCan(msg) is { } configuration)
+        {
+            int generation = _canConfigurationGeneration;
+            GLib.Idle.Add(() => {
+                if (generation == _canConfigurationGeneration) _linPanel?.ObserveHeaterConfiguration(configuration);
+                return false;
+            });
+        }
         // Filter: skip if watch list is active and ID doesn't match
         var filterIds = _filterIds;
         if (filterIds.Count > 0 && !filterIds.Contains(msg.ArbitrationId))
@@ -620,6 +638,7 @@ public class CanAnalyzerApp
                     SelectBackend(iface, bitrate);
                 if (!_stdinMode && !IsWindowsVendorInterface(iface))
                     CanInterfaceManager.EnsureReady(iface, bitrate);
+                ResetLinHeaterConfiguration();
                 _backend.Start(iface);
                 _startStopBtn.Label = "\u23f9 Stop";
                 SetSendControlsSensitive(true);
@@ -1003,7 +1022,7 @@ public class CanAnalyzerApp
             _logStartedAtUtc = DateTime.UtcNow;
             _loggedFrameCount = 0;
             _logEnabled = true;
-            _logBtn.Label = "■ Stop Logging";
+            _logBtn.Label = "■ Stop CAN Logging";
             _logBtn.StyleContext.AddClass("destructive-action");
             StartLogStatusTimer();
             UpdateLoggingStatus();
@@ -1039,7 +1058,7 @@ public class CanAnalyzerApp
             _logWriter = null;
         }
 
-        _logBtn.Label = "\U0001f4c4 Log to File";
+        _logBtn.Label = "\U0001f4c4 Log CAN to File";
         _logBtn.StyleContext.RemoveClass("destructive-action");
         if (failureMessage != null || closeError != null)
         {
@@ -1120,10 +1139,17 @@ public class CanAnalyzerApp
         _msgCountLabel.Text = "Messages: 0";
     }
 
+    private void ResetLinHeaterConfiguration()
+    {
+        System.Threading.Interlocked.Increment(ref _canConfigurationGeneration);
+        _linPanel?.ResetHeaterConfiguration();
+    }
+
     private void StopAll(bool stopLogging = false)
     {
         StopAllPeriodic();
         _backend.Stop();
+        ResetLinHeaterConfiguration();
         if (stopLogging)
             StopLogging();
         _startStopBtn.Label = "\u25b6 Start";
@@ -1203,6 +1229,7 @@ public class CanAnalyzerApp
         };
 
         _backend.Stop();
+        ResetLinHeaterConfiguration();
         _backend.OnMessageReceived -= OnCanMessage;
         _backend.OnError -= OnCanError;
         if (_backend is IDisposable disposable)

@@ -1,0 +1,14 @@
+{
+  "product": "Microchip LIN Serial Analyzer",
+  "vendorRelease": "3.0.0",
+  "installerProductVersion": "1.1.0",
+  "device": { "usbVid": "04D8", "usbPid": "0A04", "description": "LIN Bus Analyzer", "windowsService": "HidUsb" },
+  "sourcePage": "https://www.microchip.com/en-us/software-library/lin-analyzer",
+  "archiveUrl": "https://ww1.microchip.com/downloads/aemDocuments/documents/OTH/SoftwareLibrary/lin_analyzer/linanalyzer-3.0.0-windows-installer.exe.zip",
+  "archiveFile": "linanalyzer-3.0.0-windows-installer.exe.zip",
+  "archiveSha256": "4b4960c98ce9728d4d9b84fcc2ff4b8a4c10f8d3e97b616abc25cad7c19e0996",
+  "installerFile": "linanalyzer-1.1.0-windows-installer.exe",
+  "installerSha256": "fdd7389c5c6e94f2d5384ab3527b8a9e018d3a55115414a126fb24bedf30e470",
+  "authenticode": "NotSigned",
+  "redistributionStatus": "Not established; retain official installer locally and use the vendor download for releases until permission is verified."
+}

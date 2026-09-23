@@ -1,0 +1,14 @@
+ID decimal,ID hex,Expected PID,Description,Data direction,Data bytes,Checksum,Layouts
+8,0x08,0x08,Air-conditioning control,PSU → appliance,8,Enhanced,Truma aircon; Dometic aircon
+11,0x0B,0x8B,Dometic refrigerator control / echo,PSU → appliance,8,Enhanced,Dometic fridge
+12,0x0C,0x4C,Dometic refrigerator information,Appliance → PSU,8,Enhanced,Dometic fridge
+23,0x17,0x97,Air-conditioning information,Appliance → PSU,8,Enhanced,Truma aircon; Dometic aircon
+26,0x1A,0x1A,Alde heating / hot-water control,PSU → appliance,8,Enhanced,Alde 3020+; Alde / EC645 legacy; Alde / EC645 clock
+27,0x1B,0x5B,Alde heating / hot-water information,Appliance → PSU,8,Enhanced,Alde 3020+; Alde / EC645 legacy
+36,0x24,0x64,AL-KO ATC information,Appliance → PSU,8,Enhanced,AL-KO ATC; LEVC experiment (disabled)
+55,0x37,0x37,Water-heater control — Truma / Whale,PSU → appliance,8,Enhanced,Truma CP+; Whale
+56,0x38,0x78,Water-heater information — Truma / Whale,Appliance → PSU,8,Enhanced,Truma CP+; Whale
+57,0x39,0x39,Space-heater control — multiple makes,PSU → appliance,8,Enhanced,Truma CP+; Whale; Eberspacher; Webasto
+58,0x3A,0xBA,Space-heater information — multiple makes,Appliance → PSU,8,Enhanced,Truma CP+; Whale; Eberspacher; Webasto
+60,0x3C,0x3C,Diagnostic / configuration request,PSU → appliance,8,Classic,Diagnostic / configuration
+61,0x3D,0x7D,Diagnostic response,Appliance → PSU,8,Classic,Truma diagnostic; Alde diagnostic / RCP; FreshJet diagnostic

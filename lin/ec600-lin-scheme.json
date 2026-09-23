@@ -1,0 +1,572 @@
+{
+  "source": "EC600PSU V57B.c",
+  "sha256": "911c8716a3a90c0f20f76390018e5f0778ace9b3aec37849fe59d11bd83b7fa2",
+  "byteNumbering": "B0 is the first payload byte; b0 is its least significant bit. Checksum is separate.",
+  "entries": [
+    {
+      "id": 8,
+      "name": "Air-conditioning control",
+      "direction": "PSU → appliance",
+      "length": 8,
+      "checksum": "Enhanced",
+      "notes": "Shared by Truma and Dometic; select the fitted appliance layout.",
+      "layouts": [
+        {
+          "name": "Truma aircon",
+          "source": "FCM_TAircon (41635); FCM_AirconCTRL (35973)",
+          "notes": "The later Dometic-style section inside TAircon is disabled; its packed format is not a Truma layout.",
+          "bytes": [
+            "Temperature low byte; little-endian value with next byte: (raw - 2730) / 10 degrees C.",
+            "Temperature high byte. See B0.",
+            "Fan code: 0x71=low, 0x72=medium, 0x73=high, 0x74=night.",
+            "b3..0=operating mode: 0=off, 4=fan, 5=cooling, 6=heating, 7=automatic.",
+            "AC power low byte (source comment; not assigned a unit here).",
+            "AC power high byte (source comment).",
+            "Light level, 0..100%; source maps dimmer target / 2.",
+            "RFU according to source comment."
+          ]
+        },
+        {
+          "name": "Dometic aircon",
+          "source": "FCM_DAircon (45004); FCM_AirconCTRL (35973)",
+          "notes": "",
+          "bytes": [
+            "b7=aircon on; b6=light on; b1..0=part of operating-mode code; b2=fan auto flag in control path.",
+            "b7..4=target temperature minus 16 degrees C; b3..2=fan setting; b1..0=other operating-mode bits.",
+            "Copied from info frame when synchronising; meaning not established.",
+            "Copied from info frame when synchronising; meaning not established.",
+            "b7..4=iFeel temperature minus 16 degrees C; low nibble preserved.",
+            "Light dimming code written as 0, 24, 56, 88, 120 or 152.",
+            "Copied from info frame; meaning not established.",
+            "b2=sync frame (0x04), cleared after synchronising."
+          ]
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "name": "Dometic refrigerator control / echo",
+      "direction": "PSU → appliance",
+      "length": 8,
+      "checksum": "Enhanced",
+      "notes": "FridgeCTRL echoes ID 12 when no change is pending; that echo has the ID 12 status layout. Thetford branch is a placeholder, not a verified protocol.",
+      "layouts": [
+        {
+          "name": "Dometic fridge",
+          "source": "FCM_Fridge6 (32313); FCM_FridgeCTRL (49420)",
+          "notes": "",
+          "bytes": [
+            "b2..0=mode: 0=off, 1=auto, 3=gas, 5=12 V, 7=230 V. b0 acts as on flag.",
+            "Cooling setting = SetOut4[1] + 1.",
+            "Frame-heater setting from SetOut4[2] for large fridge/freezer; otherwise 0.",
+            "Written as 0 in control frame; old hour-setting code disabled. In echo: error byte.",
+            "Written as 0 in control frame; old minute-setting code disabled. In echo: status flags (see ID 12).",
+            "b4=automatic mode available; b2=frame heater fitted. Written as 0x10 or 0x14.",
+            "Written as 0 (spare) in control frame; echoed otherwise.",
+            "Written as 0 (spare) in control frame; echoed otherwise."
+          ]
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "name": "Dometic refrigerator information",
+      "direction": "Appliance → PSU",
+      "length": 8,
+      "checksum": "Enhanced",
+      "notes": "",
+      "layouts": [
+        {
+          "name": "Dometic fridge",
+          "source": "FCM_FridgeINFO (32762); FCM_Fridge6 (32313)",
+          "notes": "",
+          "bytes": [
+            "b2..0=mode: 0=off, 1=auto, 3=gas, 5=12 V, 7=230 V; PSU masks other bits. b0=on.",
+            "Cooling level; PSU subtracts 1 for SetOut4[1]. Zero is treated as fridge starting up.",
+            "Frame-heater setting copied to SetOut4[2].",
+            "Fridge error code; PSU ignores errors during first 15 seconds after on.",
+            "b2..0=FridgeState; b3=manual mode; b4=door open. Remaining bits not decoded.",
+            "Stored and echoed; no response-field meaning established.",
+            "Stored and echoed; no response-field meaning established.",
+            "Stored and echoed; no response-field meaning established."
+          ]
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "name": "Air-conditioning information",
+      "direction": "Appliance → PSU",
+      "length": 8,
+      "checksum": "Enhanced",
+      "notes": "Truma and Dometic layouts differ. Truma comments conflict with executed offsets; mappings below follow executed code.",
+      "layouts": [
+        {
+          "name": "Truma aircon",
+          "source": "FCM_AirconINFO (66897); FCM_TAircon (41635)",
+          "notes": "The nearby comment describes target at B0/B1 and light at B6; executable code uses target B2/B3 and power B6/B7. Do not apply that comment as a verified layout.",
+          "bytes": [
+            "Not decoded by the active Truma information path.",
+            "Not decoded by the active Truma information path.",
+            "Temperature low byte; little-endian value with next byte: (raw - 2730) / 10 degrees C.",
+            "Target temperature high byte. See B2.",
+            "Fan code; 0x71..0x74 identifies Truma in this PSU branch.",
+            "b3..0=operating mode; PSU masks upper nibble. 0=off, 4=fan, 5=cool, 6=heat, 7=auto.",
+            "AC power low byte, stored as TACPowerL; scale not established.",
+            "AC power high byte, stored as TACPowerH; scale not established."
+          ]
+        },
+        {
+          "name": "Dometic aircon",
+          "source": "FCM_DAircon (45004); FCM_AirconINFO (66897)",
+          "notes": "Mode is assembled as ((B0 & 128) >> 3) | (B1 & 3) | ((B0 & 3) << 2); do not interpret a single mode bit alone.",
+          "bytes": [
+            "b7=on / mode component; b6=light; b1..0=mode component.",
+            "b7..4=target temperature minus 16 degrees C; b3..2=fan setting; b1..0=mode component.",
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code.",
+            "b7..4=iFeel temperature minus 16 degrees C.",
+            "Light data echoed to control; dimming codes are set in ID 8.",
+            "Not defined by the reviewed PSU code.",
+            "b0 indicates remote/settings change in the source; other flags not established."
+          ]
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "name": "Alde heating / hot-water control",
+      "direction": "PSU → appliance",
+      "length": 8,
+      "checksum": "Enhanced",
+      "notes": "Alde 3020+ (CPSerial > 30) and older EC645 interface layouts differ.",
+      "layouts": [
+        {
+          "name": "Alde 3020+",
+          "source": "FCM_Alde9 (55024); FCM_AldeINFOCTRL9 (43527)",
+          "notes": "The sender explicitly transmits only Lin26[3..5], zeroing other bytes; not the old EC645 layout.",
+          "bytes": [
+            "Sent as 0.",
+            "Sent as 0.",
+            "Sent as 0.",
+            "b5..0=(target degrees C - 5) * 2, or 0 when off; b6=gas enabled. b7 not set by this routine.",
+            "b7..6=electric selection 0..3; code can add (HeatingNow - 5) * 2 in low bits.",
+            "b0=Alde on; b4..3=hot-water selection: 0=off, 1=normal, 2=boost; other bits not set here.",
+            "Sent as 0.",
+            "Sent as 0."
+          ]
+        },
+        {
+          "name": "Alde / EC645 legacy",
+          "source": "FCM_Alde2 (63840); FCM_AldeINFOCTRL (63574)",
+          "notes": "Alde2 also sends clock-setting frames on ID 26. Those must not be decoded as ordinary control; see full source references.",
+          "bytes": [
+            "b0=heater on; b1=gas; b3..2=electric kW 0..3; b5..4=water setting: 0=off, 2=normal, 3=boost (returns to 2 after timer). b7..6 not established.",
+            "Room target low byte; little-endian B1/B2 = target degrees C * 10.",
+            "Room target high byte. See B1.",
+            "Normal control sends constant 64 (0x40). Other branches send time/date data; see notes.",
+            "Normal control sends 0.",
+            "Normal control sends 0.",
+            "Normal control sends 0.",
+            "Normal control sends 0."
+          ]
+        },
+        {
+          "name": "Alde / EC645 clock",
+          "source": "FCM_Alde2 (64972-64997)",
+          "notes": "Clock frame uses B3 bit7, unlike normal control B3=0x40. Sent twice by the source.",
+          "bytes": [
+            "0",
+            "0",
+            "0",
+            "b7=clock marker; lower bits = Day - 1 (source Day convention).",
+            "Hour.",
+            "Minute.",
+            "0",
+            "0"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 27,
+      "name": "Alde heating / hot-water information",
+      "direction": "Appliance → PSU",
+      "length": 8,
+      "checksum": "Enhanced",
+      "notes": "",
+      "layouts": [
+        {
+          "name": "Alde 3020+",
+          "source": "FCM_AldeINFOCTRL9 (43527)",
+          "notes": "",
+          "bytes": [
+            "Room temperature = (B0 - 84) / 2 degrees C (integer arithmetic in PSU).",
+            "Bed temperature according to comment; not used, scale not established.",
+            "Outdoor temperature according to comment; not used, scale not established.",
+            "b5..0=temperature setting, degrees C = (field + 10) / 2; b6=gas; b7=energy priority.",
+            "b7..6=electric selection 0..3; other bits not decoded here.",
+            "b0=heater state; b1=manual mode; b2=error flag; b4..3=water selection; b7=pump. b6..5 not decoded.",
+            "Stored only; no meaning established.",
+            "Stored only in this layout; do not apply legacy CRC-enable flag."
+          ]
+        },
+        {
+          "name": "Alde / EC645 legacy",
+          "source": "FCM_Alde2 (63840); FCM_AldeINFOCTRL (63574)",
+          "notes": "Legacy receiver may accept data without its usual CRC check when B7 != 1. The analyzer still reports its own checksum result.",
+          "bytes": [
+            "Settings compared to ID 26 B0 (heater/gas/electric/water); other meanings not established.",
+            "Target temperature low byte compared to ID 26 B1.",
+            "Target temperature high byte compared to ID 26 B2.",
+            "HeatingStatus copied from this byte; detailed flags not defined here.",
+            "HeatingError, accepted only when <64.",
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code.",
+            "Value 1 means EC645 CRC checking enabled according to PSU code. Not the LIN checksum byte."
+          ]
+        }
+      ]
+    },
+    {
+      "id": 36,
+      "name": "AL-KO ATC information",
+      "direction": "Appliance → PSU",
+      "length": 8,
+      "checksum": "Enhanced",
+      "notes": "Active scheduler polls ID 36 for ATC. Alko2 contains a disabled LEVC experiment; those meanings are not active ATC fields.",
+      "layouts": [
+        {
+          "name": "AL-KO ATC",
+          "source": "FCM_Alko1 (44749); main polling (70701, 71919)",
+          "notes": "Source says the split variables are not currently used; raw bytes are still forwarded in CAN ID 216.",
+          "bytes": [
+            "b2..0=ATCStatus; b4..3=ATCHistogram; b7..5=ATCACCStatus. Enumeration meanings not supplied.",
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code."
+          ]
+        },
+        {
+          "name": "LEVC experiment (disabled)",
+          "source": "FCM_Alko2 (44394)",
+          "notes": "Entire LIN receive/interpretation block is #if 0. Historical experiment only, not evidence of current bus semantics.",
+          "bytes": [
+            "LEVC_Grid in disabled code.",
+            "LEVC_DCDC in disabled code.",
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code.",
+            "LEVC_Brake in disabled code."
+          ]
+        }
+      ]
+    },
+    {
+      "id": 55,
+      "name": "Water-heater control — Truma / Whale",
+      "direction": "PSU → appliance",
+      "length": 8,
+      "checksum": "Enhanced",
+      "notes": "Shared ID: choose the installed heater layout. Valid checksum does not identify the make.",
+      "layouts": [
+        {
+          "name": "Truma CP+",
+          "source": "FCM_TrumaSetHW (21787); FCM_Truma3A (46325)",
+          "notes": "",
+          "bytes": [
+            "Water target low byte: 00 00=off; 3A 0C=40 C Eco; 02 0D=60 C Hot (B0 then B1).",
+            "Water target high byte. See B0.",
+            "Energy code used by TrumaEnergy; 1=gas, 2=electric, 3=mixed (subject to PSU limiting).",
+            "Electric power low byte; B3/B4: 84 03=900 W; 08 07=1800 W.",
+            "Electric power high byte. See B3.",
+            "Sent as 0.",
+            "Sent as 0.",
+            "Sent as 0."
+          ]
+        },
+        {
+          "name": "Whale",
+          "source": "FCM_Whale5 (58677); FCM_WhaleSetWH (38174)",
+          "notes": "",
+          "bytes": [
+            "Temperature low byte; little-endian value with next byte: (raw - 2730) / 10 degrees C. Off setting encodes 0 C (0x0AAA), not all-zero bytes.",
+            "Water target high byte. Modes: off=0 C, frost=25 C, Eco=55 C, Max=72 C.",
+            "Energy selection: 0=off, 1=electric stage 1, 3=stage 2, 7=stage 3, 16=gas, 17/19/23=mixed gas + electric. b4=gas; b2..0=electric stage code (not independent switches).",
+            "Lin55[3] forwarded; meaning not established in Whale path.",
+            "Lin55[4] forwarded; meaning not established in Whale path.",
+            "Lin55[5] forwarded; meaning not established.",
+            "Lin55[6] forwarded; meaning not established.",
+            "Lin55[7] forwarded; meaning not established."
+          ]
+        }
+      ]
+    },
+    {
+      "id": 56,
+      "name": "Water-heater information — Truma / Whale",
+      "direction": "Appliance → PSU",
+      "length": 8,
+      "checksum": "Enhanced",
+      "notes": "A header without response bytes can be a poll of an absent heater; it is not an eight-byte payload of zeros.",
+      "layouts": [
+        {
+          "name": "Truma CP+",
+          "source": "FCM_Truma3A (46325); main polling (70307)",
+          "notes": "",
+          "bytes": [
+            "Water target low byte, compared to ID 55 B0: 00 00=off; 3A 0C=Eco; 02 0D=Hot.",
+            "Water target high byte.",
+            "Energy code used by TrumaEnergy; 1=gas, 2=electric, 3=mixed (subject to PSU limiting).",
+            "Electric power low byte; B3/B4 tested for 900 W / 1800 W.",
+            "Electric power high byte.",
+            "b7=heater error flag; triggers Truma diagnostic request on ID 60.",
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code."
+          ]
+        },
+        {
+          "name": "Whale",
+          "source": "FCM_Whale5 (58677); main polling (70387)",
+          "notes": "",
+          "bytes": [
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code.",
+            "Supply voltage: source tests >90 as >9 V, implying tenths of a volt.",
+            "b3..0=HotWaterError (updated 2026); upper nibble not decoded.",
+            "Not defined by the reviewed PSU code.",
+            "HotWaterStatus; b6=Whale panel busy/manual interaction."
+          ]
+        }
+      ]
+    },
+    {
+      "id": 57,
+      "name": "Space-heater control — multiple makes",
+      "direction": "PSU → appliance",
+      "length": 8,
+      "checksum": "Enhanced",
+      "notes": "Shared by Truma, Whale, Eberspacher and Webasto. No automatic make detection.",
+      "layouts": [
+        {
+          "name": "Truma CP+",
+          "source": "FCM_TrumaSetHeating (41597); FCM_Truma3A (46325)",
+          "notes": "",
+          "bytes": [
+            "Target temperature low byte; B0 + ((B1 & 15) << 8): (raw - 2730) / 10 C; zero=off.",
+            "b3..0=target high bits; b7..4=TrumaMode retained from ID 58.",
+            "Sent as 0.",
+            "Energy code used by TrumaEnergy; 1=gas, 2=electric, 3=mixed (subject to PSU limiting).",
+            "Sent as 0.",
+            "Sent as 0.",
+            "Sent as 0.",
+            "Sent as 0."
+          ]
+        },
+        {
+          "name": "Whale",
+          "source": "FCM_Whale5 (58677)",
+          "notes": "",
+          "bytes": [
+            "Temperature low byte; little-endian value with next byte: (raw - 2730) / 10 degrees C.",
+            "Target high byte. See B0.",
+            "Energy selection: 0=off, 1=electric stage 1, 3=stage 2, 7=stage 3, 16=gas, 17/19/23=mixed gas + electric. b4=gas; b2..0=electric stage code (not independent switches).",
+            "Feature code: 0=normal, 4=frost (5 C), 2=night (16 C), 1=fan only (0 C). b2=frost, b1=night, b0=fan-only in emitted codes.",
+            "Forwarded Lin57[4]; meaning not established.",
+            "Forwarded Lin57[5]; meaning not established.",
+            "Room temperature low byte from IntTL; B6/B7 little-endian: (raw - 2730) / 10 C (temperature conversion in source).",
+            "Room temperature high byte from IntTH."
+          ]
+        },
+        {
+          "name": "Eberspacher",
+          "source": "FCM_EberspacherLIN (36595)",
+          "notes": "",
+          "bytes": [
+            "Fixed 0xFF override. Disabled altitude calculation must not be treated as active.",
+            "Command mode: 0=off, 1=on TT, 2=on TTCT/TTCC (source naming differs), 8=ventilate. Purge is status only.",
+            "Target temperature = (B2 - 40) / 2 C; source writes 40 for zero C.",
+            "Room temperature low byte: raw = IntTempByte * 10 + 500.",
+            "Room temperature high byte. See B3; IntTempByte scale not assumed here.",
+            "Written as 0 when power on.",
+            "Written as 0 when power on.",
+            "Written as 0 when power on."
+          ]
+        },
+        {
+          "name": "Webasto",
+          "source": "FCM_WebastoLIN (53817)",
+          "notes": "Source contains suspect AND packing. These notes describe actual code and are not a corrected manufacturer protocol.",
+          "bytes": [
+            "Source attempts mode b2..0 and target low bits b7..5, but combines disjoint masks using AND: produces zero. No corrected decode assumed.",
+            "Source ANDs target high bits with altitude low bits; intended packing is uncertain.",
+            "Altitude upper part (target altitude >> 3), plus 0xC0. Target altitude fixed 0xFF here.",
+            "Fixed 0xFF.",
+            "b3..0=power low nibble; b7..4 fixed 0xF.",
+            "b2..0=power bits 6..4. Combined power = (B4 & 15) | ((B5 & 7) << 4).",
+            "Fixed 0xFF.",
+            "Advised cabin temperature: degrees C + 50."
+          ]
+        }
+      ]
+    },
+    {
+      "id": 58,
+      "name": "Space-heater information — multiple makes",
+      "direction": "Appliance → PSU",
+      "length": 8,
+      "checksum": "Enhanced",
+      "notes": "Select the fitted heater; do not interpret all alternative layouts as simultaneous signals.",
+      "layouts": [
+        {
+          "name": "Truma CP+",
+          "source": "FCM_Truma3A (46325); main polling (70006)",
+          "notes": "Only fields actually read by this PSU path are named; other bytes are retained raw.",
+          "bytes": [
+            "Target low byte; raw=B0+((B1 & 15)<<8); (raw-2730)/10 C; zero=off.",
+            "b3..0=target high bits; b7..4=TrumaMode, extracted and removed before PSU temperature arithmetic.",
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code.",
+            "Energy setting compared with TrumaEnergy (1=gas, 2=electric, 3=mixed).",
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code."
+          ]
+        },
+        {
+          "name": "Whale",
+          "source": "FCM_Whale5 (58677); main polling (70052)",
+          "notes": "",
+          "bytes": [
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code.",
+            "Supply voltage: source tests >90 as >9 V, implying 0.1 V per count.",
+            "b3..0=HeatingError (updated 2026); upper nibble not decoded.",
+            "Not defined by the reviewed PSU code.",
+            "HeatingStatus; b6=Whale panel busy/manual interaction."
+          ]
+        },
+        {
+          "name": "Eberspacher",
+          "source": "FCM_EberspacherLIN (36595); main Eberspacher polling branches",
+          "notes": "",
+          "bytes": [
+            "Not defined by the reviewed PSU code.",
+            "Heater error code, copied to HeatingError.",
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code.",
+            "Target temperature = (B4 - 40) / 2 C.",
+            "Not defined by the reviewed PSU code.",
+            "b7..4=heater mode: 0=off, 1=on TT, 2=ventilate, 4=purge, 5=on TTCT (source labels).",
+            "b7=EbLinStatus; remaining bits not decoded here."
+          ]
+        },
+        {
+          "name": "Webasto",
+          "source": "FCM_WebastoLIN (53817)",
+          "notes": "Temperature and voltage fragments are combined with disjoint AND operations in this source, giving zero. Physical scaling cannot be established from these calculations.",
+          "bytes": [
+            "b4..0=working mode; b7=diagnostic flag.",
+            "b1..0=error status; b7..2 used as temperature fragment.",
+            "b1..0=second temperature fragment; b7..2=voltage fragment.",
+            "b1..0=second voltage fragment.",
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code.",
+            "b3 mask named heater error; b4 mask named altitude. Source then shifts by 4/5, yielding zero: do not copy those shifts as valid decoding.",
+            "b6=component error; b7=LIN error."
+          ]
+        }
+      ]
+    },
+    {
+      "id": 60,
+      "name": "Diagnostic / configuration request",
+      "direction": "PSU → appliance",
+      "length": 8,
+      "checksum": "Classic",
+      "notes": "Shared diagnostic ID; meaning depends on addressed device and transaction. Includes normal diagnostics and configuration/test routines; not a transmit template.",
+      "layouts": [
+        {
+          "name": "Diagnostic / configuration",
+          "source": "FCM_TrumaDiag (44244); FCM_AldeDiag (20871); FCM_FreshjetNAD (21534); FCM_AldeRCP (12459)",
+          "notes": "Observed source examples: Truma 02 06 B2 23 17 46 40 13; Alde RCP 10 02 A0 01 FF FF FF FF. Alde time/date uses multi-frame diagnostic messages; session reassembly is not implemented.",
+          "bytes": [
+            "Address/NAD: examples 0x02 Truma, 0x10 Alde or old FreshJet, 0x99 reassigned FreshJet. Address alone can be ambiguous.",
+            "PCI / length control. Examples 0x06 single-frame, 0x02 Alde RCP request; multi-frame variants differ.",
+            "Service in single-frame requests: 0xB2 read identifier/error example; 0xB0 FreshJet address change; 0xA0 Alde RCP request. First-frame layout can place length here.",
+            "Request-specific data. Alde RCP example 0x01; Truma diagnostic example 0x23.",
+            "Request-specific data; not a universal flag byte.",
+            "Request-specific data; not a universal flag byte.",
+            "Request-specific data; not a universal flag byte.",
+            "Request-specific data. FreshJet address-change example: new NAD 0x99 or 0x10."
+          ]
+        }
+      ]
+    },
+    {
+      "id": 61,
+      "name": "Diagnostic response",
+      "direction": "Appliance → PSU",
+      "length": 8,
+      "checksum": "Classic",
+      "notes": "Interpret in context of the ID 60 request and device address; no automatic diagnostic-session reconstruction.",
+      "layouts": [
+        {
+          "name": "Truma diagnostic",
+          "source": "FCM_TrumaDiag (44244)",
+          "notes": "This mapping applies only to a Truma diagnostic response, not every ID 61 frame.",
+          "bytes": [
+            "Response addressing / transaction data; code does not validate a universal field layout here.",
+            "Response transport data; not application temperature.",
+            "Response service/data; not assigned universally.",
+            "Response data; no local meaning established.",
+            "Truma error class (source comment).",
+            "Truma error code. If 255, retained directly; else PSU packs error = B5 + (B4 << 5).",
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code."
+          ]
+        },
+        {
+          "name": "Alde diagnostic / RCP",
+          "source": "FCM_AldeDiag (20871); FCM_AldeRCP (12459)",
+          "notes": "PSU collects B5..B7 from first frame and B2..B7 from following frames into RCPString, then interprets tagged elements. No single-frame bit dictionary is justified.",
+          "bytes": [
+            "Device addressing (NAD).",
+            "Transport control / frame sequence. Multi-frame transaction context required.",
+            "First-frame length or subsequent RCP data depending on frame type.",
+            "First-frame service / subsequent RCP data depending on frame type.",
+            "Transaction-specific data.",
+            "First-frame RCP payload starts here in reviewed assembly code.",
+            "RCP payload.",
+            "RCP payload."
+          ]
+        },
+        {
+          "name": "FreshJet diagnostic",
+          "source": "FCM_FreshjetNAD (21534)",
+          "notes": "Configuration/testing path; exact manufacturer response layout not established.",
+          "bytes": [
+            "Address compared with 0x99 or 0x10.",
+            "Compared with 0x06.",
+            "Source compares an 8-bit value with 0x1F2 (outside byte range); this check is suspect, not a valid expected byte.",
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code.",
+            "Not defined by the reviewed PSU code."
+          ]
+        }
+      ]
+    }
+  ]
+}
