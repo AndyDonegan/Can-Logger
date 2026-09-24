@@ -233,10 +233,10 @@ public class CanAnalyzerApp
         mainBox.PackStart(_linPanel.ConnectionControls, false, false, 0);
 
         // -- Main area: watch list (left) | message table (right) -----------
-        var paned = new Paned(Orientation.Horizontal) { Position = 260 };
+        var paned = new Paned(Orientation.Horizontal) { Position = 300 };
 
         // ===== Watch list panel (left) =====================================
-        var watchPanel = new Box(Orientation.Vertical, 2);
+        var watchPanel = new Box(Orientation.Vertical, 2) { WidthRequest = 300 };
 
         // Watch list header
         var watchHeader = new Label("<b>Watch List</b>") { UseMarkup = true, Margin = 4 };
@@ -325,7 +325,8 @@ public class CanAnalyzerApp
         watchBtnBox.PackStart(watchInfoBtn, false, false, 0);
         watchPanel.PackStart(watchBtnBox, false, false, 0);
 
-        paned.Pack1(watchPanel, false, true);
+        // Respect the Watch List minimum width when dragging the divider.
+        paned.Pack1(watchPanel, false, false);
 
         // ===== Message tree view (right) ===================================
         _messageStore = new ListStore(
