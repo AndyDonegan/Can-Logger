@@ -34,6 +34,9 @@ public class CanAnalyzerApp
     private volatile HashSet<uint> _filterIds = new();
     private Entry _watchIdEntry = null!;
     private Label _watchIdError = null!;
+    private Entry _linWatchIdEntry = null!;
+    private Label _linWatchIdError = null!;
+    private HashSet<uint> _linFilterIds = new();
 
     private Label _statusLabel = null!;
     private Label _msgCountLabel = null!;
@@ -58,7 +61,7 @@ public class CanAnalyzerApp
     private enum Col
     {
         Num, Timestamp, IdDec, DataDec, IdHex, Dlc, DataHex, Desc, Type,
-        SendSlot, RowBackground, Count
+        SendSlot, RowBackground, Bus, LinDetails, LinLayout, LinRaw, LinStatus, Count
     }
 
     private sealed class SendFrameControls
@@ -211,7 +214,7 @@ public class CanAnalyzerApp
 
         controlBar.PackStart(new Separator(Orientation.Vertical), false, false, 4);
 
-        _logBtn = new Button("\U0001f4c4 Log CAN to File");
+        _logBtn = new Button("\U0001f4c4 Log output to file");
         _logBtn.Clicked += OnToggleLogging;
         controlBar.PackStart(_logBtn, false, false, 2);
 
@@ -239,30 +242,38 @@ public class CanAnalyzerApp
         var watchHeader = new Label("<b>Watch List</b>") { UseMarkup = true, Margin = 4 };
         watchPanel.PackStart(watchHeader, false, false, 0);
 
-        watchPanel.PackStart(new Label("Add ID to watch list") { Xalign = 0, Margin = 4 }, false, false, 0);
-        var addWatchBox = new Box(Orientation.Horizontal, 4) { Margin = 4 };
-        _watchIdEntry = new Entry
+        var addColumns = new Box(Orientation.Horizontal, 6) { Homogeneous = true, Margin = 4 };
+        Box AddIdControls(string title, string placeholder, string tip, out Entry entry, out Label error, System.Action add)
         {
-            PlaceholderText = "123 or 0x7AB",
-            WidthChars = 14,
-            TooltipText = "Decimal, or hexadecimal with a 0x prefix (0–0x1FFFFFFF). Session only.",
-        };
-        var addWatchBtn = new Button("Add");
-        addWatchBtn.Clicked += (_, _) => AddWatchId();
-        _watchIdEntry.Activated += (_, _) => AddWatchId();
-        addWatchBox.PackStart(_watchIdEntry, true, true, 0);
-        addWatchBox.PackStart(addWatchBtn, false, false, 0);
-        watchPanel.PackStart(addWatchBox, false, false, 0);
-        _watchIdError = new Label { Xalign = 0, Wrap = true, Margin = 4, NoShowAll = true };
-        _watchIdEntry.Changed += (_, _) => _watchIdError.Hide();
-        watchPanel.PackStart(_watchIdError, false, false, 0);
+            var column = new Box(Orientation.Vertical, 2);
+            column.PackStart(new Label(title) { Xalign = 0 }, false, false, 0);
+            var row = new Box(Orientation.Horizontal, 3);
+            var input = new Entry { PlaceholderText = placeholder, WidthChars = 7, TooltipText = tip };
+            var button = new Button("Add");
+            button.Clicked += (_, _) => add();
+            input.Activated += (_, _) => add();
+            row.PackStart(input, true, true, 0); row.PackStart(button, false, false, 0);
+            column.PackStart(row, false, false, 0);
+            var validation = new Label { Xalign = 0, Wrap = true, MaxWidthChars = 20, NoShowAll = true };
+            input.Changed += (_, _) => validation.Hide();
+            column.PackStart(validation, false, false, 0);
+            entry = input; error = validation;
+            return column;
+        }
+        addColumns.PackStart(AddIdControls("Add CAN ID", "123 / 0x7AB", "CAN ID: decimal or 0x hex, 0–0x1FFFFFFF. Session only.",
+            out _watchIdEntry, out _watchIdError, AddWatchId), true, true, 0);
+        addColumns.PackStart(AddIdControls("Add LIN ID", "55 / 0x37", "LIN ID: decimal or 0x hex, 0–63 (0x3F). Enter the ID, not the protected PID. Session only.",
+            out _linWatchIdEntry, out _linWatchIdError, () => AddWatchIdForBus(true)), true, true, 0);
+        watchPanel.PackStart(addColumns, false, false, 0);
 
         // Watch list TreeView
         _watchStore = new ListStore(
             typeof(bool),    // toggle
             typeof(uint),    // CAN ID (hidden)
             typeof(string),  // ID (decimal and hex)
-            typeof(string)   // Description
+            typeof(string),  // Description
+            typeof(string),  // Bus: CAN or LIN
+            typeof(bool)     // Selectable ID row (false for headings)
         );
 
         PopulateWatchStore();
@@ -274,11 +285,19 @@ public class CanAnalyzerApp
             SearchColumn = 3, // Description
             HasTooltip = true,
         };
-        _watchTreeView.QueryTooltip += (_, args) => ShowCanTooltip(_watchTreeView, args, 1);
+        LinTooltip.ForTree(_watchTreeView);
+        _watchTreeView.QueryTooltip += (_, args) => {
+            args.RetVal = false;
+            int x = args.X, y = args.Y;
+            if (!_watchTreeView.GetTooltipContext(ref x, ref y, args.KeyboardTooltip, out var model, out var tooltipPath, out var iter) ||
+                !(bool)model.GetValue(iter, 5)) { LinTooltip.Hide(_watchTreeView); return; }
+            if ((string)model.GetValue(iter, 4) == "CAN") { LinTooltip.Hide(_watchTreeView); ShowCanTooltip(_watchTreeView, args, 1); }
+            else LinTooltip.Show(_watchTreeView, args, (m, row) => LinScheme.Describe((int)(uint)m.GetValue(row, 1)));
+        };
 
         var wtToggle = new CellRendererToggle();
         wtToggle.Toggled += OnWatchToggled;
-        var wtCol = new TreeViewColumn("", wtToggle, "active", 0) { MinWidth = 30 };
+        var wtCol = new TreeViewColumn("", wtToggle, "active", 0, "visible", 5) { MinWidth = 30 };
         _watchTreeView.AppendColumn(wtCol);
 
         AddWatchColumn("ID (dec - hex)", 2, 100);
@@ -320,7 +339,12 @@ public class CanAnalyzerApp
             typeof(string), // Description
             typeof(string), // Type
             typeof(int),    // Assigned send-frame slot (0 means unassigned)
-            typeof(string)  // Assigned row background, or transparent when unassigned
+            typeof(string), // Assigned row background, or transparent when unassigned
+            typeof(string), // Bus
+            typeof(string), // Full LIN snapshot
+            typeof(string), // LIN interpretation
+            typeof(string), // LIN raw bytes
+            typeof(string)  // LIN diagnostics
         );
 
         _treeView = new TreeView(_messageStore)
@@ -329,18 +353,29 @@ public class CanAnalyzerApp
             EnableSearch = false,
             HasTooltip = true,
         };
+        LinTooltip.ForTree(_treeView);
         _treeView.QueryTooltip += OnTreeViewQueryTooltip;
         _treeView.ButtonPressEvent += OnMessageButtonPress;
 
         AddColumn("#", Col.Num, 40);
-        AddColumn("Timestamp", Col.Timestamp, 130);
-        AddColumn("ID (dec)", Col.IdDec, 60);
-        AddColumn("Data (dec)", Col.DataDec, 200);
-        AddColumn("ID (hex)", Col.IdHex, 90);
-        AddColumn("DLC", Col.Dlc, 40);
-        AddColumn("Data (hex)", Col.DataHex, 300);
-        AddColumn("Description", Col.Desc, 200);
-        AddColumn("Type", Col.Type, 60);
+        AddColumn("Received time", Col.Timestamp, 130);
+        AddColumn("Bus", Col.Bus, 45);
+        AddColumn("ID (decimal)", Col.IdDec, 85);
+        AddColumn("ID (hex)", Col.IdHex, 85);
+        AddColumn("Bytes", Col.Dlc, 45);
+        AddColumn("Data (decimal)", Col.DataDec, 200);
+        AddColumn("Data (hex)", Col.DataHex, 250);
+        AddColumn("Description", Col.Desc, 180);
+        AddColumn("Type / Status", Col.Type, 150);
+        _linPanel.FrameDisplayed += AddLinMessageToStore;
+        _treeView.RowActivated += (_, args) => {
+            if (_messageStore.GetIter(out var row, args.Path) && IsLinRow(_messageStore, row))
+                new LinReferenceWindow(_window, (int)_messageStore.GetValue(row, (int)Col.IdDec),
+                    (int)_messageStore.GetValue(row, (int)Col.Dlc) < 0 ? "" : (string)_messageStore.GetValue(row, (int)Col.DataHex),
+                    (string)_messageStore.GetValue(row, (int)Col.LinRaw),
+                    (string)_messageStore.GetValue(row, (int)Col.LinStatus),
+                    (string)_messageStore.GetValue(row, (int)Col.LinLayout));
+        };
 
         var scrolledWindow = new ScrolledWindow
         {
@@ -349,11 +384,7 @@ public class CanAnalyzerApp
         scrolledWindow.Add(_treeView);
         paned.Pack2(scrolledWindow, true, true);
 
-        var busTabs = new Notebook { ShowTabs = true };
-        busTabs.AppendPage(paned, new Label("CAN"));
-        busTabs.AppendPage(_linPanel, new Label("LIN data"));
-        _linPanel.ShowDataRequested += () => busTabs.CurrentPage = 1;
-        mainBox.PackStart(busTabs, true, true, 5);
+        mainBox.PackStart(paned, true, true, 5);
 
         // -- Send frame panels ----------------------------------------------
         var sendFramesBox = new Box(Orientation.Vertical, 2);
@@ -446,9 +477,20 @@ public class CanAnalyzerApp
             Resizable = true,
             MinWidth = width,
         };
+        if (col is Col.Desc or Col.Type) {
+            column.Sizing = TreeViewColumnSizing.Fixed;
+            column.FixedWidth = width;
+            cell.Ellipsize = Pango.EllipsizeMode.End;
+        }
         column.PackStart(cell, true);
-        column.AddAttribute(cell, "text", (int)col);
-        column.AddAttribute(cell, "cell-background", (int)Col.RowBackground);
+        column.SetCellDataFunc(cell, (TreeViewColumn view, CellRenderer renderer, ITreeModel model, TreeIter row) => {
+            var text = (CellRendererText)renderer;
+            text.Text = col == Col.Dlc && (int)model.GetValue(row, (int)col) < 0
+                ? "—" : Convert.ToString(model.GetValue(row, (int)col));
+            bool selected = _treeView.Selection.IterIsSelected(row);
+            text.CellBackground = selected ? null : (string)model.GetValue(row, (int)Col.RowBackground);
+            text.Foreground = !selected && IsLinRow(model, row) ? "#172B3A" : null;
+        });
         _treeView.AppendColumn(column);
     }
 
@@ -479,8 +521,54 @@ public class CanAnalyzerApp
         });
     }
 
-    private void OnTreeViewQueryTooltip(object o, QueryTooltipArgs args) =>
-        ShowCanTooltip(_treeView, args, (int)Col.IdDec);
+    private static bool IsLinRow(ITreeModel model, TreeIter row) =>
+        (string?)model.GetValue(row, (int)Col.Bus) == "LIN";
+
+    private void OnTreeViewQueryTooltip(object o, QueryTooltipArgs args)
+    {
+        args.RetVal = false;
+        int x = args.X, y = args.Y;
+        if (!_treeView.GetTooltipContext(ref x, ref y, args.KeyboardTooltip, out var model, out _, out var row)) {
+            LinTooltip.Hide(_treeView);
+            return;
+        }
+        if (IsLinRow(model, row))
+            LinTooltip.Show(_treeView, args, (m, r) => (string)m.GetValue(r, (int)Col.LinDetails));
+        else {
+            LinTooltip.Hide(_treeView);
+            ShowCanTooltip(_treeView, args, (int)Col.IdDec);
+        }
+    }
+
+    private void AddLinMessageToStore(LinMessage frame, string description, string? layout, string evidence)
+    {
+        string raw = string.Join(" ", frame.RawBytes.Select(b => b.ToString("X2")));
+        byte[] payload = frame.Complete ? frame.RawBytes[..^1] : Array.Empty<byte>();
+        string hex = frame.Complete ? string.Join(" ", payload.Select(b => b.ToString("X2"))) : "—";
+        string dec = frame.Complete ? string.Join(" ", payload.Select(b => b.ToString())) : "—";
+        string status = frame.Complete ? frame.Status : $"Incomplete — raw bytes available; {frame.Status}";
+        string last = frame.RawBytes.Length == 0 ? "Unavailable" : $"{frame.RawBytes[^1]} / 0x{frame.RawBytes[^1]:X2}";
+        string diagnostics = $"Received PID (decimal / hex): {frame.Pid} / 0x{frame.Pid:X2}\n" +
+            $"Expected PID (decimal / hex): {frame.ExpectedPid} / 0x{frame.ExpectedPid:X2}\n" +
+            $"Reported baud: {frame.Baud}\nAdapter time: {frame.DeviceTime:F6}\n" +
+            $"Raw bytes (decimal): {string.Join(" ", frame.RawBytes.Select(b => b.ToString()))}\nRaw bytes (hex): {raw}\n" +
+            $"Last byte / checksum candidate (decimal / hex): {last}\nChecksum: {frame.ChecksumStatus}\n{frame.Status}\n{evidence}";
+        string details = LinScheme.Describe(frame.Id, layout, frame.Payload, raw, diagnostics);
+        _messageCount++;
+        var row = _messageStore.InsertWithValues(0, _messageCount, frame.Timestamp.ToString("HH:mm:ss.fff"),
+            frame.Id, dec, $"0x{frame.Id:X2}", frame.Complete ? payload.Length : -1, hex, description,
+            status, 0, "#E8F4FC", "LIN", details, layout ?? "", raw, diagnostics);
+        LogDisplayedRow(row);
+        if (!_lockScrollCheck.Active) _treeView.ScrollToCell(new TreePath("0"), null, true, 0, 0);
+        TrimMessageRows();
+    }
+
+    private void TrimMessageRows()
+    {
+        if (_messageStore.IterNChildren() > MaxLogRows && _messageStore.IterNthChild(out var last, MaxLogRows))
+            while (_messageStore.Remove(ref last)) { }
+        _msgCountLabel.Text = $"Messages: {_messageCount}";
+    }
 
     private static void ShowCanTooltip(TreeView treeView, QueryTooltipArgs args, int idColumn)
     {
@@ -573,15 +661,23 @@ public class CanAnalyzerApp
         string desc = msg.IsError ? "" : (CanScheme.GetDescription(msg.ArbitrationId) ?? "");
         string frameType = msg.FrameType;
 
-        _messageStore.InsertWithValues(0,
+        var row = _messageStore.InsertWithValues(0,
             _messageCount, ts, (int)msg.ArbitrationId, dataDec, idHex, (int)msg.Dlc,
-            dataHex, desc, frameType, 0, "rgba(0,0,0,0)");
+            dataHex, desc, frameType, 0, "rgba(0,0,0,0)", "CAN", "", "", "", "");
 
         // Auto-scroll to top unless locked
         if (!_lockScrollCheck.Active)
             _treeView.ScrollToCell(new TreePath("0"), null, true, 0, 0);
 
-        // Log to file if enabled
+        LogDisplayedRow(row);
+
+        TrimMessageRows();
+    }
+
+    // Both receive paths call this only after a row passes its watch filter and
+    // enters the visible model. Existing history is not replayed when recording starts.
+    private void LogDisplayedRow(TreeIter row)
+    {
         if (_logEnabled && _logWriter != null)
         {
             Exception? writeError = null;
@@ -589,9 +685,11 @@ public class CanAnalyzerApp
             {
                 try
                 {
-                    long logRowNumber = _loggedFrameCount + 1;
-                    _logWriter.WriteLine(
-                        $"{logRowNumber},{ts},{idHex},{msg.Dlc},{dataHex},{frameType}");
+                    var columns = new[] { Col.Num, Col.Timestamp, Col.Bus, Col.IdDec, Col.IdHex,
+                        Col.Dlc, Col.DataDec, Col.DataHex, Col.Desc, Col.Type };
+                    string[] values = columns.Select(col => col == Col.Dlc && (int)_messageStore.GetValue(row, (int)col) < 0
+                        ? "—" : Convert.ToString(_messageStore.GetValue(row, (int)col), System.Globalization.CultureInfo.InvariantCulture) ?? "").ToArray();
+                    _logWriter.WriteLine(string.Join(",", values.Select(CsvField)));
                     _loggedFrameCount++;
                 }
                 catch (Exception ex)
@@ -609,15 +707,10 @@ public class CanAnalyzerApp
             }
         }
 
-        // Trim old rows
-        if (_messageStore.IterNChildren() > MaxLogRows)
-        {
-            if (_messageStore.IterNthChild(out var last, MaxLogRows))
-                while (_messageStore.Remove(ref last)) { }
-        }
-
-        _msgCountLabel.Text = $"Messages: {_messageCount}";
     }
+
+    private static string CsvField(string value) => value.IndexOfAny(new[] { ',', '"', '\r', '\n' }) >= 0
+        ? "\"" + value.Replace("\"", "\"\"") + "\"" : value;
 
     // ------------------------------------------------------------------
     // Button handlers
@@ -685,7 +778,7 @@ public class CanAnalyzerApp
             return;
 
         string frameType = (string)_messageStore.GetValue(iter, (int)Col.Type);
-        if (frameType == "ERR")
+        if (IsLinRow(_messageStore, iter) || frameType == "ERR")
             return;
 
         Gdk.ModifierType modifiers = args.Event.State;
@@ -701,6 +794,7 @@ public class CanAnalyzerApp
         if (sendFrameIndex < 0 || sendFrameIndex >= _sendFrames.Count)
             return;
 
+        if (IsLinRow(_messageStore, selectedIter)) return;
         int assignedSlot = sendFrameIndex + 1;
         _messageStore.Foreach((model, path, iter) =>
         {
@@ -735,7 +829,7 @@ public class CanAnalyzerApp
     private void PopulateSendFields(TreeIter iter, SendFrameControls controls)
     {
         string frameType = (string)_messageStore.GetValue(iter, (int)Col.Type);
-        if (frameType == "ERR")
+        if (IsLinRow(_messageStore, iter) || frameType == "ERR")
             return;
 
         int arbitrationId = (int)_messageStore.GetValue(iter, (int)Col.IdDec);
@@ -804,17 +898,12 @@ public class CanAnalyzerApp
     private void PopulateWatchStore()
     {
         _watchStore.Clear();
-        if (!CanScheme.IsLoaded) return;
-
+        _watchStore.AppendValues(false, 0u, "CAN", "", "CAN", false);
         foreach (var def in CanScheme.AllEntries)
-        {
-            _watchStore.AppendValues(
-                _filterIds.Contains(def.Id),
-                def.Id,
-                $"{def.IdDec} - {def.IdHex}",
-                def.Description
-            );
-        }
+            _watchStore.AppendValues(_filterIds.Contains(def.Id), def.Id, $"{def.IdDec} - {def.IdHex}", def.Description, "CAN", true);
+        _watchStore.AppendValues(false, 0u, "LIN", "", "LIN", false);
+        foreach (var def in LinScheme.Entries)
+            _watchStore.AppendValues(_linFilterIds.Contains((uint)def.Id), (uint)def.Id, $"{def.Id} - 0x{def.Id:X2}", def.Name, "LIN", true);
     }
 
     private static bool TryParseWatchId(string text, out uint id)
@@ -826,66 +915,77 @@ public class CanAnalyzerApp
             System.Globalization.CultureInfo.InvariantCulture, out id) && id <= 0x1FFFFFFF;
     }
 
-    private void AddWatchId()
+    private void AddWatchId() => AddWatchIdForBus(false);
+
+    private void AddWatchIdForBus(bool lin)
     {
-        if (!TryParseWatchId(_watchIdEntry.Text, out uint id))
+        var entry = lin ? _linWatchIdEntry : _watchIdEntry;
+        var error = lin ? _linWatchIdError : _watchIdError;
+        if (!TryParseWatchId(entry.Text, out uint id) || (lin && id > 63))
         {
-            _watchIdError.Text = "Enter 0–536870911 (hex: 0x0–0x1FFFFFFF).";
-            _watchIdError.Show();
-            return;
+            error.Text = lin ? "Enter LIN ID 0–63 (0x00–0x3F), not PID." : "Enter CAN ID 0–536870911 (0x0–0x1FFFFFFF).";
+            error.Show(); return;
         }
-
-        TreeIter match = default;
+        string bus = lin ? "LIN" : "CAN";
+        TreeIter match = default, linHeading = default;
         bool found = false;
-        _watchStore.Foreach((model, path, iter) =>
-        {
-            if ((uint)model.GetValue(iter, 1) != id) return false;
-            match = iter;
-            found = true;
-            return true;
+        _watchStore.Foreach((model, path, iter) => {
+            if (!(bool)model.GetValue(iter, 5)) {
+                if ((string)model.GetValue(iter, 4) == "LIN") linHeading = iter;
+                return false;
+            }
+            if ((string)model.GetValue(iter, 4) != bus || (uint)model.GetValue(iter, 1) != id) return false;
+            match = iter; found = true; return false;
         });
-        if (found)
-            _watchStore.SetValue(match, 0, true);
-        else
-            match = _watchStore.AppendValues(true, id, $"{id} - 0x{id:X3}", "Ad-hoc (session only)");
-
-        _filterIds = new HashSet<uint>(_filterIds) { id };
+        if (found) _watchStore.SetValue(match, 0, true);
+        else {
+            match = lin ? _watchStore.Append() : _watchStore.InsertBefore(linHeading);
+            _watchStore.SetValues(match, true, id, $"{id} - 0x{id.ToString(lin ? "X2" : "X3")}", "Ad-hoc (session only)", bus, true);
+        }
+        if (lin) { _linFilterIds.Add(id); UpdateLinWatchFilter(); }
+        else _filterIds = new HashSet<uint>(_filterIds) { id };
         var rowPath = _watchStore.GetPath(match);
         _watchTreeView.SetCursor(rowPath, null, false);
         _watchTreeView.ScrollToCell(rowPath, null, true, 0.5f, 0);
-        _watchIdEntry.Text = "";
-        _watchIdError.Hide();
-        _watchIdEntry.GrabFocus();
+        entry.Text = ""; error.Hide(); entry.GrabFocus();
     }
+
+    private void UpdateLinWatchFilter() => _linPanel?.SetWatchIds(_linFilterIds.Select(id => (int)id));
 
     private void OnWatchToggled(object o, ToggledArgs args)
     {
         if (_watchStore.GetIter(out var iter, new TreePath(args.Path)))
         {
+            if (!(bool)_watchStore.GetValue(iter, 5)) return;
+            bool lin = (string)_watchStore.GetValue(iter, 4) == "LIN";
             bool current = (bool)_watchStore.GetValue(iter, 0);
             _watchStore.SetValue(iter, 0, !current);
             uint id = (uint)_watchStore.GetValue(iter, 1);
 
-            var selectedIds = new HashSet<uint>(_filterIds);
+            var selectedIds = new HashSet<uint>(lin ? _linFilterIds : _filterIds);
             if (!current)
                 selectedIds.Add(id);
             else
                 selectedIds.Remove(id);
-            _filterIds = selectedIds;
+            if (lin) { _linFilterIds = selectedIds; UpdateLinWatchFilter(); }
+            else _filterIds = selectedIds;
         }
     }
 
     private void SetWatchAll(bool selected)
     {
         var selectedIds = new HashSet<uint>();
+        var linIds = new HashSet<uint>();
         _watchStore.Foreach((model, path, iter) =>
         {
+            if (!(bool)model.GetValue(iter, 5)) return false;
             uint id = (uint)_watchStore.GetValue(iter, 1);
             _watchStore.SetValue(iter, 0, selected);
-            if (selected) selectedIds.Add(id);
+            if (selected) { if ((string)model.GetValue(iter, 4) == "LIN") linIds.Add(id); else selectedIds.Add(id); }
             return false;
         });
         _filterIds = selectedIds;
+        _linFilterIds = linIds; UpdateLinWatchFilter();
     }
 
     private void OnWatchInfo(object? sender, EventArgs e)
@@ -897,7 +997,9 @@ public class CanAnalyzerApp
 
         if (_watchStore.GetIter(out var iter, path))
         {
+            if (!(bool)_watchStore.GetValue(iter, 5)) return;
             uint id = (uint)_watchStore.GetValue(iter, 1);
+            if ((string)_watchStore.GetValue(iter, 4) == "LIN") { new LinReferenceWindow(_window, (int)id); return; }
             string info = CanScheme.GetInfoText(id);
             ShowCanIdInfo(id, info);
         }
@@ -995,12 +1097,12 @@ public class CanAnalyzerApp
         }
 
         var dialog = new FileChooserDialog(
-            "Save CAN Log", _window,
+            "Save analyzer output", _window,
             FileChooserAction.Save,
             "Cancel", ResponseType.Cancel,
             "Save", ResponseType.Accept);
         dialog.DoOverwriteConfirmation = true;
-        dialog.CurrentName = "can_log.csv";
+        dialog.CurrentName = "CAN-LIN Analyzer Output.csv";
 
         if (dialog.Run() == (int)ResponseType.Accept)
         {
@@ -1018,11 +1120,11 @@ public class CanAnalyzerApp
         {
             _logFilePath = Path.GetFullPath(path);
             _logWriter = new StreamWriter(_logFilePath, append: false) { AutoFlush = true };
-            _logWriter.WriteLine("#,Timestamp,ID (hex),DLC,Data (hex),Type");
+            _logWriter.WriteLine("#,Received time,Bus,ID (decimal),ID (hex),Bytes,Data (decimal),Data (hex),Description,Type / Status");
             _logStartedAtUtc = DateTime.UtcNow;
             _loggedFrameCount = 0;
             _logEnabled = true;
-            _logBtn.Label = "■ Stop CAN Logging";
+            _logBtn.Label = "■ Stop logging";
             _logBtn.StyleContext.AddClass("destructive-action");
             StartLogStatusTimer();
             UpdateLoggingStatus();
@@ -1058,7 +1160,7 @@ public class CanAnalyzerApp
             _logWriter = null;
         }
 
-        _logBtn.Label = "\U0001f4c4 Log CAN to File";
+        _logBtn.Label = "\U0001f4c4 Log output to file";
         _logBtn.StyleContext.RemoveClass("destructive-action");
         if (failureMessage != null || closeError != null)
         {
@@ -1114,7 +1216,7 @@ public class CanAnalyzerApp
         _logStatusLabel.Markup =
             $"<span foreground=\"#d32f2f\"><b>● RECORDING</b></span> — " +
             $"{EscapeMarkup(fileName)} — {elapsedText} — {FormatFrameCount(_loggedFrameCount)}" +
-            (_backend.IsRunning ? "" : " — waiting for CAN");
+            (_loggedFrameCount == 0 ? " — waiting for output" : "");
         _logStatusLabel.TooltipText = _logFilePath ?? "";
     }
 
@@ -1136,6 +1238,7 @@ public class CanAnalyzerApp
     {
         _messageStore.Clear();
         _messageCount = 0;
+        _linPanel?.ResetCounts();
         _msgCountLabel.Text = "Messages: 0";
     }
 

@@ -35,11 +35,11 @@ A **GTK# 3 desktop application** written in **C# (.NET 8)** for monitoring and s
 - **CSV logging** — start and stop recording with a live filename, elapsed-time, and frame-count indicator
 - **Four CAN backends** — local SocketCAN, Waveshare USB-CAN-FD, iTEK/E&J USBCAN-I, or remote candump over SSH
 - **CAN scheme file** — load a CSV defining CAN IDs, descriptions, and per-byte meanings
-- **Watch List filtering** — tick individual CAN IDs to filter the message view in real time
+- **Watch List filtering** — independent CAN and LIN checkboxes; tick individual IDs to filter the message view in real time
 - **Byte-level info** — inspect individual bytes of a selected message with variable/function details
 - **Lock scroll** — freeze the message view while inspecting older frames
 - **Hex/Dec toggle** — switch between hexadecimal and decimal display for ID and data columns
-- **Row tooltips** — hover over any message row for a byte-level breakdown
+- **Row tooltips** — hover over any message row for a byte-level breakdown; LIN details appear after a stationary hover, stay within the window and support scrolling after moving into the popup; moving away dismisses them and only one can be open
 
 ---
 
@@ -210,9 +210,15 @@ The `--stdin` flag switches to the `CandumpStdinBackend`, which parses `candump`
 6. Click a received frame to copy it into blue **Send CAN Frame 1**, Shift-click one for amber **Frame 2**, or Ctrl-click one for green **Frame 3**. Each source row remains highlighted in the matching colour, and each panel's Hex/Decimal toggle controls its copied format.
 7. Use any of the three **Send CAN Frame** panels to transmit independent messages.
 8. Optionally start **Periodic** sending at a fixed interval
-9. Click **📄 Log to File** to save a CSV log
+9. Click **📄 Log output to file** to save a CSV log
 
-Logging remains active if the CAN stream is stopped or restarted, so one CSV can
+The default filename is **CAN-LIN Analyzer Output.csv**. Recording includes new
+CAN and LIN rows displayed after logging starts, respecting each bus’s watch filter.
+The CSV contains the ten visible columns, including Bus, both ID/data number bases,
+description and status. Rows are written in arrival order. Existing screen history
+is not exported. Clear resets screen row numbers but does not erase the log.
+
+Logging remains active if either stream is stopped or restarted, so one CSV can
 cover multiple capture sessions. Click **■ Stop Logging** to finish and close the
 file; closing the application also closes any active log safely.
 
@@ -291,9 +297,10 @@ in the vendor sample package failed device discovery in the WSL bridge environme
 
 | Control | Action |
 |---------|--------|
-| **Watch List** | Tick/untick CAN IDs to filter incoming messages. Only ticked IDs are shown; with no IDs ticked, all IDs are shown. Existing displayed rows are retained. |
-| **Add ID to watch list** | Enter a decimal ID (e.g. `1963`) or hexadecimal with a `0x` prefix (e.g. `0x7AB`), then click **Add** or press Enter. The ID appears ticked and can be unticked normally. Adding an existing ID ticks its existing row. Standard and extended IDs up to `0x1FFFFFFF` are accepted. Ad-hoc rows last for this session and do not change `can-scheme.csv`. |
-| **All / None** | Select or clear all IDs in the watch list. |
+| **Watch List** | CAN entries appear first, followed by a LIN section. Each bus is filtered independently: ticked IDs select new incoming rows; no IDs ticked for a bus means show all of that bus. Existing displayed rows are retained. |
+| **Add CAN ID** | Enter a decimal ID (e.g. `1963`) or hexadecimal with a `0x` prefix (e.g. `0x7AB`), then click **Add** or press Enter. The ID appears ticked and can be unticked normally. Adding an existing ID ticks its existing row. Standard and extended IDs up to `0x1FFFFFFF` are accepted. Ad-hoc rows last for this session and do not change `can-scheme.csv`. |
+| **Add LIN ID** | Beside Add CAN ID in an equal-width second column. Enter decimal 0–63 or hex 0x00–0x3F (ID, not protected PID), then Add or Enter. Duplicates reuse the LIN row; ad-hoc rows are session-only. |
+| **All / None** | Select or clear both CAN and LIN checkboxes; headings are not selectable. None restores unfiltered traffic for both buses. |
 | **Info** | Select a message row and click Info for a per-byte breakdown. |
 | **Lock scroll** | Freezes the table scroll position so you can inspect older messages. |
 | **Description column** | Shows the purpose of each CAN ID, loaded from `can-scheme.csv`. |
@@ -399,16 +406,29 @@ This project is provided as-is for educational and personal use. Use responsibly
 
 ## LIN receive test
 
-A separate **LIN data** tab supports the Microchip USB LIN analyzer
+The combined message view supports the Microchip USB LIN analyzer
 through a portable Windows helper, alongside the existing CAN connection.
 For the EC600, leave **Initial baud** at **19600**, then press **Start LIN**.
 See [LIN setup and first test](docs/LIN-RECEIVE-TEST.md).
+**EC600 LIN reference** is always visible beside **Start LIN**.
 The **EC600 LIN reference** button opens the ID table and source-backed byte/bit
 layouts. Hover over a received row for details; double-click for a scrollable
-inspection. **Hover layout** defaults to automatic heater selection from received
-CAN 133 byte 2 (2=Truma CP+, 3=Whale, 4=Eberspacher), with manual overrides.
+inspection. Hover details use automatic heater selection from received
+CAN 133 byte 2 (2=Truma CP+, 3=Whale, 4=Eberspacher). Other layouts can be inspected in the reference window.
 Alde generation and conflicting setting 5 remain manual. Selection is reported
 configuration, not proof that a heater is connected; no commands are sent.
 See the [full EC600 LIN reference](docs/EC600-LIN-REFERENCE.md) or
 [CSV ID table](docs/EC600-LIN-IDS.csv).
-LIN watch-list integration, logging and sending remain planned.
+The message table includes a **Bus** column. LIN rows have a light pastel-blue tint
+with contrasting text; selected rows use the normal theme selection colours.
+CAN send-slot highlights and LIN status/checksum text remain available.
+The combined view receives both streams simultaneously using the shared watch
+list. IDs and payload bytes have separate decimal and hex columns; LIN payload
+counts exclude the checksum. Incomplete LIN payloads show `—`, with all raw bytes,
+received/expected PID, checksum evidence, baud and adapter time in the scrollable
+popup. Double-click a LIN row for the full reference snapshot. LIN rows cannot be
+assigned to CAN send controls.
+
+Start CAN and Start LIN remain independent and keep the combined view visible.
+The separate LIN comparison screen and its navigation button have been removed.
+Clear empties the combined table and resets receive counters. File logging records displayed CAN and LIN frames; LIN sending remains planned.

@@ -21,7 +21,7 @@ try
 {
     window.ShowAll();
     Pump(300);
-    foreach (string mode in new[] { "windowed", "maximized", "fullscreen" })
+    foreach (string mode in args.Contains("--hover-only") ? new[] { "windowed" } : new[] { "windowed", "maximized", "fullscreen" })
     {
         if (mode == "maximized") window.Maximize();
         if (mode == "fullscreen") window.Fullscreen();
@@ -34,7 +34,7 @@ try
         foreach (string field in new[] { "_watchTreeView", "_treeView" })
         {
             var tree = (TreeView)appType.GetField(field, fields)!.GetValue(app)!;
-            var cell = tree.GetCellArea(new TreePath("0"), tree.Columns[0]);
+            var cell = tree.GetCellArea(new TreePath(field == "_watchTreeView" ? "1" : "0"), tree.Columns[0]);
             tree.ConvertBinWindowToWidgetCoords(cell.X + 5, cell.Y + cell.Height / 2,
                 out int left, out int y);
             foreach (int x in new[] { left, tree.AllocatedWidth / 2, tree.AllocatedWidth - 6 })
@@ -72,12 +72,106 @@ try
                 }
             }
         }
+        VerifyLongLinPopup(mode);
     }
 }
 finally
 {
     window.Destroy();
     Pump(100);
+}
+
+void VerifyLongLinPopup(string mode)
+{
+    var tree = (TreeView)appType.GetField("_treeView", fields)!.GetValue(app)!;
+    var factory = typeof(LinScheme).Assembly.GetType("CanLogger.LinTooltip")!
+        .GetMethod("ForTree", BindingFlags.NonPublic | BindingFlags.Static)!;
+    var controller = factory.Invoke(null, new object[] { tree })!;
+    var type = controller.GetType();
+    var show = type.GetMethod("Show", fields)!;
+    var close = type.GetMethod("Close", fields)!;
+    var popup = (Popover)type.GetField("_popup", fields)!.GetValue(controller)!;
+    var scroll = (ScrolledWindow)type.GetField("_scroll", fields)!.GetValue(controller)!;
+    var text = (TextView)type.GetField("_text", fields)!.GetValue(controller)!;
+    foreach (int id in args.Contains("--hover-only") ? Array.Empty<int>() : new[] { 57, 58 })
+    foreach (int x in new[] { 8, tree.AllocatedWidth - 8 })
+    foreach (int y in new[] { tree.AllocatedHeight * 3 / 4, tree.AllocatedHeight - 12 }) {
+        close.Invoke(controller, null);
+        string full = LinScheme.Describe(id);
+        show.Invoke(controller, new object[] { full, id.ToString(), x, y });
+        Pump(150);
+        if (!popup.TranslateCoordinates(window, 0, 0, out int px, out int py))
+            throw new Exception("Cannot measure LIN popover position");
+        if (px < 0 || py < 0 || px + popup.AllocatedWidth > window.AllocatedWidth || py + popup.AllocatedHeight > window.AllocatedHeight)
+            throw new Exception($"LIN {id} clipped in {mode}: {px},{py} {popup.AllocatedWidth}x{popup.AllocatedHeight}");
+        if (text.Buffer.Text != full) throw new Exception("LIN definition truncated");
+        var adjustment = scroll.Vadjustment;
+        if (adjustment.Upper <= adjustment.PageSize) throw new Exception("Long LIN definition has no scroll range");
+        adjustment.Value = adjustment.Upper - adjustment.PageSize;
+        Pump(50);
+        double bottom = adjustment.Value;
+        int hides = 0;
+        EventHandler hidden = (_, _) => hides++;
+        popup.Hidden += hidden;
+        for (int sample = 0; sample < 10; sample++) {
+            show.Invoke(controller, new object[] { "Changed live frame", "new-row", x, y });
+            Pump(20);
+        }
+        popup.Hidden -= hidden;
+        if (hides != 0 || !popup.Visible || text.Buffer.Text != full || Math.Abs(adjustment.Value - bottom) > 1)
+            throw new Exception("Live updates disturbed open LIN details or scroll position");
+        // Pointer entry must protect the interactive panel from the delayed close.
+        type.GetField("_inside", fields)!.SetValue(controller, true);
+        type.GetMethod("ScheduleClose", fields)!.Invoke(controller, null);
+        Pump(650);
+        if (!popup.Visible) throw new Exception("LIN popup closed while reading inside it");
+        type.GetField("_inside", fields)!.SetValue(controller, false);
+        type.GetMethod("ScheduleClose", fields)!.Invoke(controller, null);
+        Pump(650);
+        if (popup.Visible) throw new Exception("LIN popup did not close after pointer departure");
+        close.Invoke(controller, null);
+    }
+    if (mode == "windowed") {
+        var request = type.GetMethod("RequestShow", fields)!;
+        var motion = type.GetMethod("PointerMoved", fields)!;
+        var enter = type.GetMethod("EnterTree", fields)!;
+        var watchTree = (TreeView)appType.GetField("_watchTreeView", fields)!.GetValue(app)!;
+        var watch = factory.Invoke(null, new object[] { watchTree })!;
+        var watchPopup = (Popover)type.GetField("_popup", fields)!.GetValue(watch)!;
+        // Rapid traversal must never show a panel, even though GTK asks for content.
+        for (int i = 0; i < 8; i++) {
+            motion.Invoke(controller, new object[] { 10 + i, 100 });
+            request.Invoke(controller, new object[] { "Hover test", "0", 10 + i, 100 });
+            Pump(80);
+            if (popup.Visible) throw new Exception("Popup appeared during pointer movement");
+        }
+        // Repeated queries with a stationary pointer must not restart the dwell timer.
+        for (int i = 0; i < 4; i++) {
+            request.Invoke(controller, new object[] { "Hover test", "0", 17, 100 });
+            Pump(160);
+        }
+        if (!popup.Visible) throw new Exception("Stationary hover did not open details");
+        for (int i = 0; i < 5; i++) {
+            motion.Invoke(controller, new object[] { 50 + i, 100 });
+            Pump(80);
+        }
+        if (popup.Visible) throw new Exception("Continuous movement prolonged the old popup");
+        show.Invoke(controller, new object[] { "Main", "0", 10, 100 });
+        enter.Invoke(watch, null);
+        if (popup.Visible) throw new Exception("Crossing into watch list left the old popup open");
+        request.Invoke(watch, new object[] { "Watch details", "1", 10, 100 });
+        Pump(150);
+        if (watchPopup.Visible) throw new Exception("Watch popup ignored hover delay");
+        enter.Invoke(controller, null);
+        Pump(700);
+        if (watchPopup.Visible) throw new Exception("Abandoned watch hover opened later");
+        show.Invoke(controller, new object[] { "Main", "0", 10, 100 });
+        show.Invoke(watch, new object[] { "Watch", "1", 10, 100 });
+        if (popup.Visible || !watchPopup.Visible) throw new Exception("Multiple panels can remain open");
+        close.Invoke(watch, null);
+        Console.WriteLine("PASS: hover dwell, movement cancellation, repeated queries, cross-table dismissal, abandoned timer and single-popup ownership");
+    }
+    if (!args.Contains("--hover-only")) Console.WriteLine($"PASS: {mode}/LIN 57 and 58: 8 bounded placements, full text, scrolling, stable snapshot across 80 updates");
 }
 
 void Query(TreeView tree, string field, int x, int y)

@@ -1,0 +1,63 @@
+#,Received time,Bus,ID (decimal),ID (hex),Bytes,Data (decimal),Data (hex),Description,Type / Status
+1,07:53:11.705,LIN,58,0x3A,—,—,—,Space-heater information — multiple makes,Incomplete — raw bytes available; Bus timeout
+2,07:53:11.964,LIN,55,0x37,8,170 10 0 0 0 0 0 0,AA 0A 00 00 00 00 00 00,Water-heater control — Truma / Whale,Valid enhanced
+3,07:53:12.474,LIN,57,0x39,8,210 10 0 0 0 0 155 11,D2 0A 00 00 00 00 9B 0B,Space-heater control — multiple makes,Valid enhanced
+4,07:53:12.584,LIN,56,0x38,—,—,—,Water-heater information — Truma / Whale,Incomplete — raw bytes available; Bus timeout
+5,07:53:13.126,LIN,58,0x3A,—,—,—,Space-heater information — multiple makes,Incomplete — raw bytes available; Bus timeout
+6,07:53:13.397,LIN,55,0x37,8,170 10 0 0 0 0 0 0,AA 0A 00 00 00 00 00 00,Water-heater control — Truma / Whale,Valid enhanced
+7,07:53:13.909,LIN,57,0x39,8,210 10 0 0 0 0 155 11,D2 0A 00 00 00 00 9B 0B,Space-heater control — multiple makes,Valid enhanced
+8,07:53:14.022,LIN,56,0x38,—,—,—,Water-heater information — Truma / Whale,Incomplete — raw bytes available; Bus timeout
+9,07:53:14.551,LIN,58,0x3A,—,—,—,Space-heater information — multiple makes,Incomplete — raw bytes available; Bus timeout
+10,07:53:14.832,LIN,55,0x37,8,170 10 0 0 0 0 0 0,AA 0A 00 00 00 00 00 00,Water-heater control — Truma / Whale,Valid enhanced
+11,07:53:15.333,LIN,57,0x39,8,210 10 0 0 0 0 155 11,D2 0A 00 00 00 00 9B 0B,Space-heater control — multiple makes,Valid enhanced
+12,07:53:15.458,LIN,56,0x38,—,—,—,Water-heater information — Truma / Whale,Incomplete — raw bytes available; Bus timeout
+13,07:53:15.990,LIN,58,0x3A,—,—,—,Space-heater information — multiple makes,Incomplete — raw bytes available; Bus timeout
+14,07:53:16.261,LIN,55,0x37,8,170 10 0 0 0 0 0 0,AA 0A 00 00 00 00 00 00,Water-heater control — Truma / Whale,Valid enhanced
+15,07:53:16.783,LIN,57,0x39,8,210 10 0 0 0 0 155 11,D2 0A 00 00 00 00 9B 0B,Space-heater control — multiple makes,Valid enhanced
+16,07:53:16.893,LIN,56,0x38,—,—,—,Water-heater information — Truma / Whale,Incomplete — raw bytes available; Bus timeout
+17,07:53:17.420,LIN,58,0x3A,—,—,—,Space-heater information — multiple makes,Incomplete — raw bytes available; Bus timeout
+18,07:53:17.689,LIN,55,0x37,8,170 10 0 0 0 0 0 0,AA 0A 00 00 00 00 00 00,Water-heater control — Truma / Whale,Valid enhanced
+19,07:53:18.205,LIN,57,0x39,8,210 10 0 0 0 0 155 11,D2 0A 00 00 00 00 9B 0B,Space-heater control — multiple makes,Valid enhanced
+20,07:53:18.315,LIN,56,0x38,—,—,—,Water-heater information — Truma / Whale,Incomplete — raw bytes available; Bus timeout
+21,07:53:18.858,LIN,58,0x3A,—,—,—,Space-heater information — multiple makes,Incomplete — raw bytes available; Bus timeout
+22,07:53:19.116,LIN,55,0x37,8,170 10 0 0 0 0 0 0,AA 0A 00 00 00 00 00 00,Water-heater control — Truma / Whale,Valid enhanced
+23,07:53:19.645,LIN,57,0x39,8,210 10 0 0 0 0 155 11,D2 0A 00 00 00 00 9B 0B,Space-heater control — multiple makes,Valid enhanced
+24,07:53:19.757,LIN,56,0x38,—,—,—,Water-heater information — Truma / Whale,Incomplete — raw bytes available; Bus timeout
+25,07:53:20.285,LIN,58,0x3A,—,—,—,Space-heater information — multiple makes,Incomplete — raw bytes available; Bus timeout
+26,07:53:20.557,LIN,55,0x37,8,170 10 0 0 0 0 0 0,AA 0A 00 00 00 00 00 00,Water-heater control — Truma / Whale,Valid enhanced
+27,07:53:21.070,LIN,57,0x39,8,210 10 0 0 0 0 155 11,D2 0A 00 00 00 00 9B 0B,Space-heater control — multiple makes,Valid enhanced
+28,07:53:21.183,LIN,56,0x38,—,—,—,Water-heater information — Truma / Whale,Incomplete — raw bytes available; Bus timeout
+29,07:53:21.720,LIN,58,0x3A,—,—,—,Space-heater information — multiple makes,Incomplete — raw bytes available; Bus timeout
+30,07:53:21.995,LIN,55,0x37,8,170 10 0 0 0 0 0 0,AA 0A 00 00 00 00 00 00,Water-heater control — Truma / Whale,Valid enhanced
+31,07:53:22.501,LIN,57,0x39,8,210 10 0 0 0 0 155 11,D2 0A 00 00 00 00 9B 0B,Space-heater control — multiple makes,Valid enhanced
+32,07:53:22.610,LIN,56,0x38,—,—,—,Water-heater information — Truma / Whale,Incomplete — raw bytes available; Bus timeout
+33,07:53:23.150,LIN,58,0x3A,—,—,—,Space-heater information — multiple makes,Incomplete — raw bytes available; Bus timeout
+34,07:53:23.424,LIN,55,0x37,8,170 10 0 0 0 0 0 0,AA 0A 00 00 00 00 00 00,Water-heater control — Truma / Whale,Valid enhanced
+35,07:53:23.947,LIN,57,0x39,8,210 10 0 0 0 0 155 11,D2 0A 00 00 00 00 9B 0B,Space-heater control — multiple makes,Valid enhanced
+36,07:53:24.049,LIN,56,0x38,—,—,—,Water-heater information — Truma / Whale,Incomplete — raw bytes available; Bus timeout
+37,07:53:24.591,LIN,58,0x3A,—,—,—,Space-heater information — multiple makes,Incomplete — raw bytes available; Bus timeout
+38,07:53:24.863,LIN,55,0x37,8,170 10 0 0 0 0 0 0,AA 0A 00 00 00 00 00 00,Water-heater control — Truma / Whale,Valid enhanced
+39,07:53:25.376,LIN,57,0x39,8,210 10 0 0 0 0 155 11,D2 0A 00 00 00 00 9B 0B,Space-heater control — multiple makes,Valid enhanced
+40,07:53:25.489,LIN,56,0x38,—,—,—,Water-heater information — Truma / Whale,Incomplete — raw bytes available; Bus timeout
+41,07:53:26.016,LIN,58,0x3A,—,—,—,Space-heater information — multiple makes,Incomplete — raw bytes available; Bus timeout
+42,07:53:26.285,LIN,55,0x37,8,170 10 0 0 0 0 0 0,AA 0A 00 00 00 00 00 00,Water-heater control — Truma / Whale,Valid enhanced
+43,07:53:26.967,LIN,57,0x39,8,210 10 0 0 0 0 156 11,D2 0A 00 00 00 00 9C 0B,Space-heater control — multiple makes,Valid enhanced
+44,07:53:27.078,LIN,56,0x38,—,—,—,Water-heater information — Truma / Whale,Incomplete — raw bytes available; Bus timeout
+45,07:53:27.461,LIN,58,0x3A,—,—,—,Space-heater information — multiple makes,Incomplete — raw bytes available; Bus timeout
+46,07:53:27.734,LIN,55,0x37,8,170 10 0 0 0 0 0 0,AA 0A 00 00 00 00 00 00,Water-heater control — Truma / Whale,Valid enhanced
+47,07:53:28.340,LIN,56,0x38,—,—,—,Water-heater information — Truma / Whale,Incomplete — raw bytes available; Bus timeout
+48,07:53:28.454,LIN,57,0x39,8,210 10 0 0 0 0 156 11,D2 0A 00 00 00 00 9C 0B,Space-heater control — multiple makes,Valid enhanced
+49,07:53:28.884,LIN,58,0x3A,—,—,—,Space-heater information — multiple makes,Incomplete — raw bytes available; Bus timeout
+50,07:53:29.155,LIN,55,0x37,8,170 10 0 0 0 0 0 0,AA 0A 00 00 00 00 00 00,Water-heater control — Truma / Whale,Valid enhanced
+51,07:53:29.671,LIN,57,0x39,8,210 10 0 0 0 0 156 11,D2 0A 00 00 00 00 9C 0B,Space-heater control — multiple makes,Valid enhanced
+52,07:53:29.784,LIN,56,0x38,—,—,—,Water-heater information — Truma / Whale,Incomplete — raw bytes available; Bus timeout
+53,07:53:30.312,LIN,58,0x3A,—,—,—,Space-heater information — multiple makes,Incomplete — raw bytes available; Bus timeout
+54,07:53:30.583,LIN,55,0x37,8,170 10 0 0 0 0 0 0,AA 0A 00 00 00 00 00 00,Water-heater control — Truma / Whale,Valid enhanced
+55,07:53:31.097,LIN,57,0x39,8,210 10 0 0 0 0 156 11,D2 0A 00 00 00 00 9C 0B,Space-heater control — multiple makes,Valid enhanced
+56,07:53:31.208,LIN,56,0x38,—,—,—,Water-heater information — Truma / Whale,Incomplete — raw bytes available; Bus timeout
+57,07:53:31.744,LIN,58,0x3A,—,—,—,Space-heater information — multiple makes,Incomplete — raw bytes available; Bus timeout
+58,07:53:32.014,LIN,55,0x37,8,170 10 0 0 0 0 0 0,AA 0A 00 00 00 00 00 00,Water-heater control — Truma / Whale,Valid enhanced
+59,07:53:32.542,LIN,57,0x39,8,210 10 0 0 0 0 156 11,D2 0A 00 00 00 00 9C 0B,Space-heater control — multiple makes,Valid enhanced
+60,07:53:32.654,LIN,56,0x38,—,—,—,Water-heater information — Truma / Whale,Incomplete — raw bytes available; Bus timeout
+61,07:53:33.179,LIN,58,0x3A,—,—,—,Space-heater information — multiple makes,Incomplete — raw bytes available; Bus timeout
+62,07:53:33.451,LIN,55,0x37,8,170 10 0 0 0 0 0 0,AA 0A 00 00 00 00 00 00,Water-heater control — Truma / Whale,Valid enhanced

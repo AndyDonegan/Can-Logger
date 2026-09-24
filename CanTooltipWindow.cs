@@ -43,6 +43,8 @@ internal sealed class CanTooltipWindow : Window
             label.Destroy();
             return;
         }
+        bool sameAnchor = _anchor.Equals(anchor);
+        GetPreferredSize(out _, out var oldSize);
         _anchor = anchor;
         var previous = Child;
         if (previous != null)
@@ -52,9 +54,11 @@ internal sealed class CanTooltipWindow : Window
         }
         Add(label);
         label.Show();
-        // Older Wayland compositors cannot reposition a mapped popup. Remap a
-        // changed visible tooltip after GTK finishes processing this query.
-        if (Visible && !_positionQueued)
+        GetPreferredSize(out _, out var newSize);
+        bool geometryChanged = !sameAnchor || oldSize.Width != newSize.Width || oldSize.Height != newSize.Height;
+        // Text-only updates must not flash the window. Older Wayland compositors
+        // require remapping only when the actual size or anchor changes.
+        if (Visible && geometryChanged && !_positionQueued)
         {
             _positionQueued = true;
             GLib.Idle.Add(() =>
@@ -68,6 +72,14 @@ internal sealed class CanTooltipWindow : Window
                 return false;
             });
         }
+    }
+
+    protected override void OnRealized()
+    {
+        base.OnRealized();
+        // A large, screen-clamped tooltip can cover its own hover point. It must
+        // not steal pointer input from the tree and trigger a leave/hide loop.
+        Window.PassThrough = true;
     }
 
     protected override void OnShown()

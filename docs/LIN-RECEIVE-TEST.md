@@ -2,15 +2,20 @@
 
 Choose **Microchip APG LIN Analyzer (USB)** from **LIN analyzer** directly below
 the CAN connection controls, leave **Initial baud** at **19600** for this EC600,
-then press **Start LIN**. This opens **LIN data**
-automatically; **Show LIN data** opens that view without connecting. The LIN
-connection row stays visible while viewing CAN. Close Microchip's own
+then press **Start LIN**. CAN and LIN share the main message table; starting or
+stopping LIN does not navigate away. **EC600 LIN reference** remains visible beside **Start LIN**. Hover layouts are selected automatically from CAN heater settings; the reference window retains its appliance selector. The LIN
+connection row stays visible. Close Microchip's own
 application first so only one application owns the analyzer. **Stop LIN** releases
 it; starting/stopping CAN is independent. App shutdown also stops LIN.
 
-This first stage uses a separate LIN table. Existing watch selection, CAN scheme,
-CAN send panels and CAN file logging still apply to CAN only. The shared
-CAN/LIN watch list, LIN file logging and LIN transmission remain later stages.
+LIN still uses a separate message table. The shared watch list has CAN first,
+then LIN, including all 13 known LIN IDs. Add CAN ID and Add LIN ID occupy equal
+halves of the add-controls row. Each bus filters independently; no checked IDs
+means show all IDs for that bus, and existing displayed rows remain. LIN IDs
+are 0–63, not protected PIDs. Unknown IDs can be added for this session.
+Hover and Info use the appropriate bus definition. CAN scheme and send panels apply to CAN only. **Log output to file** records
+new displayed CAN and LIN rows, respecting watch filters. LIN transmission remains
+a later stage.
 EC600 source definitions are now available in **EC600 LIN reference**; see
 [the ID and byte reference](EC600-LIN-REFERENCE.md). The LIN table retains the latest 2,000 records and reports
 any display-queue overflow. Clear LIN clears the displayed records.
@@ -220,3 +225,30 @@ settings are rejected after CAN session reset. Invalid, extended, error, short
 and command frames are ignored. Unknown settings and setting 5 remain manual.
 Live simultaneous CAN/LIN configuration detection has not yet been verified on
 the attached PSU; no additional hardware commands were sent during these tests.
+
+LIN hover details now use an interactive GTK popover with a bounded scrolling
+area. Move the pointer into the popup and use the wheel or scrollbar to read the
+complete definition, including long heater IDs 57 and 58. The frame stays frozen
+while open, so incoming rows cannot reset the scroll position. Leaving the panel
+allows a 250 ms transfer into its scrollable area; moving into another table
+dismisses it immediately. Details open only after a 650 ms stationary hover,
+and moving or scrolling cancels a pending opening. Only one LIN popup can be
+open across the app. There is no Close button; moving away or Escape dismisses it.
+CAN tooltips retain their separate pointer-passthrough placement handling.
+
+Regression checks exercise both heater IDs near the lower left and right edges
+in windowed, maximized and fullscreen modes: actual widget bounds, complete text,
+scroll range, stable scroll position during repeated queries, and delayed-close
+state. These checks do not synthesize physical pointer movement; the original
+hover sequence still needs confirmation on the user's desktop.
+
+Combined receive view: the main table receives filtered LIN frames alongside CAN
+traffic. The temporary LIN comparison table has been removed. Ten shared columns
+show receive time, bus, ID and payload in both number bases, byte count, description
+and type/status. Incomplete captures have no claimed payload length. LIN details
+preserve raw bytes, PID comparison, checksum candidate, reported baud and adapter
+time. CAN send-row assignment rejects LIN frames. Clear resets the combined view and receive counters;
+file logging records displayed CAN and LIN rows using the same ten visible columns.
+
+Run `DOTNET_ROLL_FORWARD=Major dotnet run --project tests/LinReceive -- --combined-ui`
+for injected mixed-stream coverage without transmitting to the attached hardware.
