@@ -432,3 +432,31 @@ assigned to CAN send controls.
 Start CAN and Start LIN remain independent and keep the combined view visible.
 The separate LIN comparison screen and its navigation button have been removed.
 Clear empties the combined table and resets receive counters. File logging records displayed CAN and LIN frames; LIN sending remains planned.
+
+## Live watch window
+
+Select any CAN or LIN ID in the Watch List (or use Add CAN ID / Add LIN ID) to
+open Live Watch. The Show Watch / Hide Watch button is enabled only while at
+least one ID is selected. Closing the window hides it and preserves selections;
+it continues receiving updates and can be reopened with Show Watch.
+
+Each selected bus/ID has one fixed row in a larger font. The ID column keeps
+decimal and hexadecimal together (for example, `55 37`). Eight decimal byte
+columns 0–7 appear on the left, followed by eight hexadecimal byte columns 0–7
+on the right, all on the same line.
+Columns fit their contents with approximately one character of spacing. Changed bytes highlight briefly;
+identical repeated frames do not restart the highlight. Missing bytes and IDs
+awaiting their first frame show `—`. LIN payloads exclude the checksum;
+incomplete responses show `—` rather than inferred bytes.
+
+The window is independent and movable, grows or shrinks with the selection, and
+stops growing near the screen height. Larger lists can be scrolled manually;
+incoming messages never reorder rows or scroll the view. Removing an ID clears
+its live values, so selecting it again waits for a fresh frame. Selecting None
+hides the window and disables its button.
+
+Desktop integration check (synthetic frames; no hardware required):
+
+```bash
+dotnet run --project tests/LiveWatch/LiveWatch.csproj
+```

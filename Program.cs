@@ -28,6 +28,8 @@ public class CanAnalyzerApp
     private Label _logStatusLabel = null!;
     private CheckButton _lockScrollCheck = null!;
     private readonly List<SendFrameControls> _sendFrames = new();
+    private LiveWatchWindow? _liveWatchWindow;
+    private Button _liveWatchButton = null!;
     private TreeView _watchTreeView = null!;
     private ListStore _watchStore = null!;
     // Published snapshots are never mutated: the receive thread reads this set.
@@ -139,6 +141,7 @@ public class CanAnalyzerApp
         win.SetDefaultSize(1300, 700);
         win.DeleteEvent += (_, _) =>
         {
+            _liveWatchWindow?.Destroy();
             _linPanel?.Close();
             StopAll(stopLogging: true);
             Application.Quit();
@@ -324,6 +327,13 @@ public class CanAnalyzerApp
         watchInfoBtn.Clicked += OnWatchInfo;
         watchBtnBox.PackStart(watchInfoBtn, false, false, 0);
         watchPanel.PackStart(watchBtnBox, false, false, 0);
+        _liveWatchButton = new Button("Show Watch") { Sensitive = false };
+        _liveWatchButton.Clicked += (_, _) => {
+            if (_liveWatchWindow == null) return;
+            if (_liveWatchWindow.Visible) _liveWatchWindow.HideWatch();
+            else _liveWatchWindow.ShowWatch();
+        };
+        watchPanel.PackStart(_liveWatchButton, false, false, 0);
 
         // Respect the Watch List minimum width when dragging the divider.
         paned.Pack1(watchPanel, false, false);
@@ -543,6 +553,7 @@ public class CanAnalyzerApp
 
     private void AddLinMessageToStore(LinMessage frame, string description, string? layout, string evidence)
     {
+        _liveWatchWindow?.Update("LIN", (uint)frame.Id, frame.Complete ? frame.RawBytes[..^1] : Array.Empty<byte>());
         string raw = string.Join(" ", frame.RawBytes.Select(b => b.ToString("X2")));
         byte[] payload = frame.Complete ? frame.RawBytes[..^1] : Array.Empty<byte>();
         string hex = frame.Complete ? string.Join(" ", payload.Select(b => b.ToString("X2"))) : "—";
@@ -650,6 +661,7 @@ public class CanAnalyzerApp
 
     private void AddMessageToStore(CanMessage msg)
     {
+        if (!msg.IsError) _liveWatchWindow?.Update("CAN", msg.ArbitrationId, msg.Data.Take(msg.Dlc).ToArray());
         _messageCount++;
         string ts = msg.Timestamp.ToString("HH:mm:ss.fff");
         string idHex = msg.IsError ? "-" : msg.IdHex;
@@ -949,6 +961,21 @@ public class CanAnalyzerApp
         _watchTreeView.SetCursor(rowPath, null, false);
         _watchTreeView.ScrollToCell(rowPath, null, true, 0.5f, 0);
         entry.Text = ""; error.Hide(); entry.GrabFocus();
+        SyncLiveWatch(open: true);
+    }
+
+    private void SyncLiveWatch(bool open)
+    {
+        bool any = _filterIds.Count + _linFilterIds.Count > 0;
+        _liveWatchButton.Sensitive = any;
+        if (_liveWatchWindow == null && any)
+        {
+            _liveWatchWindow = new LiveWatchWindow(_window);
+            _liveWatchWindow.VisibilityChanged += () =>
+                _liveWatchButton.Label = _liveWatchWindow.Visible ? "Hide Watch" : "Show Watch";
+        }
+        _liveWatchWindow?.SetSelection(
+            _filterIds.Select(id => ("CAN", id)).Concat(_linFilterIds.Select(id => ("LIN", id))), open);
     }
 
     private void UpdateLinWatchFilter() => _linPanel?.SetWatchIds(_linFilterIds.Select(id => (int)id));
@@ -970,6 +997,7 @@ public class CanAnalyzerApp
                 selectedIds.Remove(id);
             if (lin) { _linFilterIds = selectedIds; UpdateLinWatchFilter(); }
             else _filterIds = selectedIds;
+            SyncLiveWatch(open: !current);
         }
     }
 
@@ -987,6 +1015,7 @@ public class CanAnalyzerApp
         });
         _filterIds = selectedIds;
         _linFilterIds = linIds; UpdateLinWatchFilter();
+        SyncLiveWatch(open: selected);
     }
 
     private void OnWatchInfo(object? sender, EventArgs e)
