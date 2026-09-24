@@ -27,6 +27,17 @@ try
     {
         ((Entry)Field(app, lin ? "_linWatchIdEntry" : "_watchIdEntry")).Text = id;
         Call(app, "AddWatchIdForBus", lin); Pump();
+        var live = (Window)Field(app, "_liveWatchWindow");
+        var liveStore = (ListStore)Field(live, "_store");
+        var liveTree = (TreeView)Field(live, "_tree");
+        int count = liveStore.IterNChildren();
+        if (count <= 8)
+        {
+            using var last = new TreePath((count - 1).ToString());
+            var bounds = liveTree.GetBackgroundArea(last, liveTree.Columns[0]);
+            int remaining = liveTree.BinWindow.Height - bounds.Y - bounds.Height;
+            Check(remaining >= bounds.Height && remaining < 2 * bounds.Height, $"Expected one blank row below {count} IDs; got {remaining}px for a {bounds.Height}px row");
+        }
     }
     Add(false, "55");
     watch = (Window)Field(app, "_liveWatchWindow");
@@ -71,6 +82,40 @@ try
     Call(app, "AddMessageToStore", can);
     Check(expiry[0] == deadline, "Unchanged frames do not restart highlight");
     Pump(750); Check(expiry.All(x => x == 0), "Highlight expires");
+    var tree = (TreeView)Field(watch, "_tree");
+    using var canPath = store.GetPath(Find("CAN", 55));
+    bool Toggle(int column) => (bool)Call(watch, "ToggleCell", canPath, tree.Columns[column])!;
+    string Background(int column)
+    {
+        tree.Columns[column].CellSetCellData(store, Find("CAN", 55), false, false);
+        var rgba = ((CellRendererText)tree.Columns[column].Cells[0]).CellBackgroundRgba;
+        return $"{(int)Math.Round(rgba.Red * 255):X2}{(int)Math.Round(rgba.Green * 255):X2}{(int)Math.Round(rgba.Blue * 255):X2}";
+    }
+    Check(watch.TransientFor == main, "Watch remains associated above main window");
+    Check(!Toggle(0) && !Toggle(1), "Bus and ID clicks do not select byte cells");
+    Check(Toggle(5), "Decimal byte 3 can be selected");
+    var focused = (bool[])Field(row, "Focused");
+    Check(focused[3] && Background(5) == "2463B5" && Background(13) == "2463B5", "Decimal selection paints both byte 3 cells blue");
+    var hit = tree.GetCellArea(canPath, tree.Columns[13]);
+    Check(tree.GetPathAtPos(hit.X + hit.Width / 2, hit.Y + hit.Height / 2,
+        out var hitPath, out var hitColumn) && hitColumn == tree.Columns[13], "Mouse hit testing identifies hex byte 3");
+    using (hitPath)
+        Check((bool)Call(watch, "ToggleCell", hitPath, hitColumn)! && !focused[3], "Hex byte 3 toggles the same selection off");
+    Check(Toggle(13) && focused[3], "Hex byte 3 toggles both on");
+    Check(Toggle(2) && focused[0] && focused[3], "Multiple byte pairs can remain selected");
+    Call(app, "AddMessageToStore", can with { Dlc = 4, Data = new byte[] { 10, 255, 2, 99 } });
+    Check(Background(5) == "FFE08A" && Background(13) == "FFE08A", "Update flash overrides blue in both formats");
+    Pump(750);
+    Check(Background(5) == "2463B5" && Background(13) == "2463B5", "Both cells return to blue after flash");
+    if (args.Contains("--snapshot"))
+    {
+        using var surface = new Cairo.ImageSurface(Cairo.Format.Argb32, watch.AllocatedWidth, watch.AllocatedHeight);
+        using var context = new Cairo.Context(surface);
+        watch.Draw(context);
+        surface.WriteToPng("/tmp/canlogger-livewatch.png");
+    }
+    Call(watch, "HideWatch"); Call(watch, "ShowWatch"); Pump();
+    Check(focused[3] && Background(13) == "2463B5", "Hide/show preserves cell focus");
     Call(app, "AddMessageToStore", can with { Dlc = 1, Data = new byte[] { 11 } });
     Check((string)store.GetValue(Find("CAN", 55), 3) == "—", "Short payload clears old bytes");
     Call(watch, "HideWatch");
@@ -101,12 +146,12 @@ try
     Call(app, "SetWatchAll", true); Pump(300);
     Check(store.IterNChildren() > 12, "All includes known IDs");
     var area = watch.Display.GetMonitorAtWindow(watch.Window).Workarea;
-    Check(watch.AllocatedHeight <= area.Height - 80, "Large watch list stays within screen height");
+    Check(watch.AllocatedHeight <= area.Height - 80, $"Large watch list stays within screen height: allocated={watch.AllocatedHeight}, area={area.Height}");
     var position = store.GetPath(Find("CAN", 55)).ToString();
     Call(app, "AddMessageToStore", can);
     Check(store.GetPath(Find("CAN", 55)).ToString() == position, "Incoming data never reorders rows");
     Call(app, "AddLinMessageToStore", new LinMessage(DateTime.Now, 55, 19600, 0, 1, new byte[] { 42 }), "test", "", "test");
     Check((string)store.GetValue(Find("LIN", 55), 2) == "—", "Incomplete LIN response shows no inferred payload");
-    Console.WriteLine("PASS: selection, bus isolation, payloads, highlights, hide/reopen, and automatic sizing.");
+    Console.WriteLine("PASS: selection, bus isolation, payloads, paired blue focus, flash restoration, hide/reopen, and sizing.");
 }
 finally { watch?.Destroy(); main.Destroy(); }

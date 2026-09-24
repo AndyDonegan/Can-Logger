@@ -10,6 +10,7 @@ internal sealed class LiveWatchWindow : Window
         public TreeIter Iter;
         public byte?[] Bytes = new byte?[8];
         public long[] HighlightUntil = new long[8];
+        public bool[] Focused = new bool[8];
     }
 
     private readonly Dictionary<(string Bus, uint Id), WatchRow> _rows = new();
@@ -17,36 +18,52 @@ internal sealed class LiveWatchWindow : Window
     private readonly TreeView _tree;
     private readonly Window _parent;
     private bool _closed;
+    private bool _fitQueued;
     public event System.Action? VisibilityChanged;
 
     public LiveWatchWindow(Window parent) : base("Live Watch — CAN / LIN")
     {
         _parent = parent;
-        // An independent, non-modal window can be moved behind the main window.
+        TransientFor = parent;
+        DestroyWithParent = true;
+        KeepAbove = true;
         BorderWidth = 8;
         _store = new ListStore(Enumerable.Repeat(typeof(string), 18).ToArray());
         _tree = new TreeView(_store) { HeadersVisible = true, EnableSearch = false };
         _tree.Selection.Mode = SelectionMode.None;
+        _tree.ButtonPressEvent += OnCellButtonPress;
         for (int i = 0; i < 18; i++)
         {
             int index = i;
-            var cell = new CellRendererText { Font = "Monospace 13", Xpad = 4, Ypad = 4 };
+            var cell = new WatchCellRenderer(i >= 2, i == 17, i == 10) { Font = "Monospace 13", Xpad = 4, Ypad = 4 };
             var column = new TreeViewColumn { Title = i == 0 ? "Bus" : i == 1 ? "ID" : $"{(i == 2 ? "Dec" : i == 10 ? "Hex" : "")}\n{(i - 2) % 8}", Sizing = TreeViewColumnSizing.Fixed, Expand = false };
             column.PackStart(cell, true);
             column.SetCellDataFunc(cell, (TreeViewColumn c, CellRenderer renderer, ITreeModel model, TreeIter iter) => {
                 var text = (CellRendererText)renderer;
                 text.Text = (string)model.GetValue(iter, index);
-                bool changed = false;
+                bool changed = false, focused = false;
                 if (index >= 2)
                 {
                     string bus = (string)model.GetValue(iter, 0);
                     uint id = uint.Parse(((string)model.GetValue(iter, 1)).Split(' ')[0]);
-                    changed = _rows.TryGetValue((bus, id), out var row) && row.HighlightUntil[(index - 2) % 8] > Environment.TickCount64;
+                    if (_rows.TryGetValue((bus, id), out var row))
+                    {
+                        int byteIndex = (index - 2) % 8;
+                        changed = row.HighlightUntil[byteIndex] > Environment.TickCount64;
+                        focused = row.Focused[byteIndex];
+                    }
                 }
-                text.CellBackground = changed ? "#FFE08A" : null;
-                text.Foreground = changed ? "#202020" : null;
+                text.CellBackground = changed ? "#FFE08A" : focused ? "#2463B5" : null;
+                text.Foreground = changed ? "#202020" : focused ? "#FFFFFF" : null;
             });
             _tree.AppendColumn(column);
+            if (i == 10)
+            {
+                var css = new CssProvider();
+                css.LoadFromData("button { border-left: 4px solid alpha(currentColor, 0.85); }");
+                column.Button.StyleContext.AddProvider(css, 800);
+                css.Dispose();
+            }
         }
         var box = new Box(Orientation.Vertical, 6);
         box.PackStart(new Label("Decimal bytes 0–7 (left) • Hex bytes 0–7 (right)") { Xalign = 0 }, false, false, 0);
@@ -70,6 +87,69 @@ internal sealed class LiveWatchWindow : Window
         });
     }
 
+    // Draw after the cell background, so selection and update flashes retain the grid.
+    private sealed class WatchCellRenderer : CellRendererText
+    {
+        private readonly bool _leftDivider;
+        private readonly bool _rightDivider;
+        private readonly bool _tableDivider;
+        public WatchCellRenderer(bool leftDivider, bool rightDivider, bool tableDivider)
+        { _leftDivider = leftDivider; _rightDivider = rightDivider; _tableDivider = tableDivider; }
+
+        protected override void OnRender(Cairo.Context cr, Widget widget,
+            Gdk.Rectangle backgroundArea, Gdk.Rectangle cellArea, CellRendererState flags)
+        {
+            base.OnRender(cr, widget, backgroundArea, cellArea, flags);
+            var color = widget.StyleContext.GetColor(StateFlags.Normal);
+            cr.Save();
+            cr.Rectangle(backgroundArea.X, backgroundArea.Y, backgroundArea.Width, backgroundArea.Height);
+            cr.Clip();
+            cr.SetSourceRGBA(color.Red, color.Green, color.Blue, 0.22);
+            cr.LineWidth = 1;
+            cr.MoveTo(backgroundArea.X, backgroundArea.Y + backgroundArea.Height - 0.5);
+            cr.LineTo(backgroundArea.X + backgroundArea.Width, backgroundArea.Y + backgroundArea.Height - 0.5);
+            cr.Stroke();
+            cr.SetSourceRGBA(color.Red, color.Green, color.Blue, 0.75);
+            cr.LineWidth = _tableDivider ? 4 : 2;
+            if (_leftDivider)
+            {
+                double x = backgroundArea.X + (_tableDivider ? 2 : 1);
+                cr.MoveTo(x, backgroundArea.Y);
+                cr.LineTo(x, backgroundArea.Y + backgroundArea.Height);
+            }
+            if (_rightDivider)
+            {
+                cr.MoveTo(backgroundArea.X + backgroundArea.Width - 1, backgroundArea.Y);
+                cr.LineTo(backgroundArea.X + backgroundArea.Width - 1, backgroundArea.Y + backgroundArea.Height);
+            }
+            cr.Stroke();
+            cr.Restore();
+        }
+    }
+
+    [GLib.ConnectBefore]
+    private void OnCellButtonPress(object sender, ButtonPressEventArgs args)
+    {
+        if (args.Event.Button != 1 || args.Event.Type != Gdk.EventType.ButtonPress) return;
+        if (_tree.GetPathAtPos((int)args.Event.X, (int)args.Event.Y, out TreePath path, out TreeViewColumn column))
+        {
+            using (path) args.RetVal = ToggleCell(path, column);
+        }
+    }
+
+    private bool ToggleCell(TreePath path, TreeViewColumn column)
+    {
+        int index = Array.IndexOf(_tree.Columns, column);
+        if (index < 2 || !_store.GetIter(out var iter, path)) return false;
+        string bus = (string)_store.GetValue(iter, 0);
+        uint id = uint.Parse(((string)_store.GetValue(iter, 1)).Split(' ')[0]);
+        if (!_rows.TryGetValue((bus, id), out var row)) return false;
+        int byteIndex = (index - 2) % 8;
+        row.Focused[byteIndex] = !row.Focused[byteIndex];
+        _tree.QueueDraw();
+        return true;
+    }
+
     public void SetSelection(IEnumerable<(string Bus, uint Id)> selection, bool open)
     {
         var keys = selection.ToHashSet();
@@ -90,6 +170,7 @@ internal sealed class LiveWatchWindow : Window
             _rows.Add(key, new WatchRow { Iter = _store.AppendValues(values) });
         }
         FitRows();
+        QueueFitRows();
         if (_rows.Count == 0) HideWatch();
         else if (open) ShowWatch();
     }
@@ -106,23 +187,54 @@ internal sealed class LiveWatchWindow : Window
         {
             string sample = i == 0 ? "Bus" : i == 1
                 ? _rows.Keys.Select(key => $"{key.Id} {key.Id:X2}").OrderByDescending(text => text.Length).FirstOrDefault() ?? "ID"
-                : i < 10 ? "255" : i == 10 ? "Hex" : "FF";
+                : "255";
             using var layout = _tree.CreatePangoLayout(sample);
             layout.FontDescription = font;
             layout.GetPixelSize(out int width, out _);
-            _tree.Columns[i].FixedWidth = width + 10;
-            contentWidth += width + 10;
+            int padding = i == 1 ? 24 : 10;
+            _tree.Columns[i].FixedWidth = width + padding;
+            contentWidth += width + padding;
         }
-        _tree.GetPreferredSize(out _, out var natural);
+        // Size from the current row count rather than a potentially stale tree
+        // requisition immediately after inserting rows. Include window decorations,
+        // the header, and a full blank row beneath the final ID.
+        using var firstPath = new TreePath("0");
+        int rowHeight = _rows.Count > 0 ? _tree.GetBackgroundArea(firstPath, _tree.Columns[0]).Height : 0;
+        if (rowHeight <= 0)
+        {
+            _tree.Columns[0].Cells[0].GetPreferredHeight(_tree, out _, out int cellHeight);
+            rowHeight = cellHeight + 2;
+        }
+        int headerHeight = Math.Max(40, _tree.Columns[10].Button.AllocatedHeight);
+        // GetSize can report a pending resize before allocation catches up.
+        // Use the allocated content box so repeated fits see consistent geometry.
+        int clientHeight = (Child?.AllocatedHeight ?? 0) + (int)BorderWidth * 2;
+        int decorationHeight = IsMapped ? Math.Max(0, AllocatedHeight - clientHeight) : 0;
+        int chromeHeight = IsMapped ? Math.Max(0, clientHeight - _tree.AllocatedHeight) : 40;
+        int desiredHeight = chromeHeight + headerHeight + (_rows.Count + 1) * rowHeight;
         Resize(Math.Min(contentWidth + 32, Math.Max(1, area.Width - 40)),
-            Math.Min(Math.Max(140, natural.Height + 65), Math.Max(1, area.Height - 100)));
+            Math.Min(Math.Max(140, desiredHeight), Math.Max(1, area.Height - 100 - decorationHeight)));
+    }
+
+    private void QueueFitRows()
+    {
+        if (_fitQueued) return;
+        _fitQueued = true;
+        // Recheck once GTK has allocated newly added rows and window decorations.
+        GLib.Timeout.Add(40, () => {
+            _fitQueued = false;
+            if (!_closed && Visible) FitRows();
+            return false;
+        });
     }
 
     public void ShowWatch()
     {
         if (_rows.Count == 0) return;
+        KeepAbove = true;
         ShowAll();
         FitRows();
+        QueueFitRows();
         Present();
         VisibilityChanged?.Invoke();
     }

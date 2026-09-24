@@ -449,7 +449,8 @@ identical repeated frames do not restart the highlight. Missing bytes and IDs
 awaiting their first frame show `—`. LIN payloads exclude the checksum;
 incomplete responses show `—` rather than inferred bytes.
 
-The window is independent and movable, grows or shrinks with the selection, and
+The window is movable and stays on top while shown. Use Hide Watch or its close
+button to hide it. It grows or shrinks with the selection and
 stops growing near the screen height. Larger lists can be scrolled manually;
 incoming messages never reorder rows or scroll the view. Removing an ID clears
 its live values, so selecting it again waits for a fresh frame. Selecting None
@@ -460,3 +461,12 @@ Desktop integration check (synthetic frames; no hardware required):
 ```bash
 dotnet run --project tests/LiveWatch/LiveWatch.csproj
 ```
+
+Live Watch has bold vertical byte-column dividers starting after ID, with faint
+horizontal row lines extending across Bus and ID. The thicker divider between
+decimal byte 7 and hex byte 0 extends through the header. Automatic sizing leaves
+one blank row below the last ID, unless the screen-height limit is reached. Click any decimal or hex byte
+cell to toggle blue focus for both representations of that byte in the same row.
+Multiple byte pairs can be focused. Changed values briefly flash yellow, then
+return to blue. Focus persists while the window is hidden; removing the watched
+ID clears its focus. There is extra spacing between ID and decimal byte 0.
