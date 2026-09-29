@@ -6,6 +6,8 @@ Read-only review of the matching V57B generated C and Flowcode project. This is 
 
 All 13 distinct literal IDs in the LIN send/receive call sites are included. Parameterised calls are the two receive wrappers. Historical firmware variants were not exhaustively catalogued. Disabled examples are labelled; runtime appliance selection determines which IDs actually appear.
 
+For every Webasto bit group, exact calculations, downstream uses and worked examples, see the [Webasto source walkthrough](EC600-WEBASTO-LIN.md). It also compares the original Flowcode and newer V57C Whale macro.
+
 B0 is the first payload byte; b0 is its least significant bit. Checksum is separate.
 
 The PSU sends every header. “Appliance → PSU” describes who supplies the response data. Every transaction listed requests/sends eight payload bytes; the checksum is additional.
@@ -390,20 +392,20 @@ Source routines / generated-C lines: FCM_EberspacherLIN (36595).
 
 ### Webasto
 
-Source routines / generated-C lines: FCM_WebastoLIN (53817).
+Source routines / generated-C lines: FCM_WebastoLIN (53817; parse 53859–53876; pack 53965–53982); active receive/status (71129–71192).
 
 | Byte | Meaning from source |
 | --- | --- |
-| B0 | Source attempts mode b2..0 and target low bits b7..5, but combines disjoint masks using AND: produces zero. No corrected decode assumed. |
-| B1 | Source ANDs target high bits with altitude low bits; intended packing is uncertain. |
-| B2 | Altitude upper part (target altitude >> 3), plus 0xC0. Target altitude fixed 0xFF here. |
-| B3 | Fixed 0xFF. |
-| B4 | b3..0=power low nibble; b7..4 fixed 0xF. |
-| B5 | b2..0=power bits 6..4. Combined power = (B4 & 15) \| ((B5 & 7) << 4). |
-| B6 | Fixed 0xFF. |
-| B7 | Advised cabin temperature: degrees C + 50. |
+| B0 | All bits zero: (mode & 7) AND ((target & 7) << 5). Attempted b2..0 mode and b7..5 target bits are lost; b4..3 also zero. |
+| B1 | b2..0=(target >> 3) & 7; b7..3=0. Exact packing: ((target & 248) >> 3) AND (altitude & 7). Altitude is 255. Intended target 5–35 C gives B1=0–4; low target bits lost in B0. |
+| B2 | Fixed 0xDF: b4..0=31 from (altitude & 248) >> 3; b5=0; b7..6=3 from +0xC0. Altitude variable is 0xFF (comment: signal not available). |
+| B3 | All bits fixed 1 (0xFF); individual signal meanings not given. |
+| B4 | b3..0=power low four bits; b7..4 fixed 0xF. Power comes from SetOut3[1] when on, otherwise 0. Source comment: 0–100 means 0–100%; no clamp here. |
+| B5 | b2..0=power bits 6..4; b7..3=0. Represented power = (B4 & 15) OR ((B5 & 7) << 4); source-labelled percent, intended 0–100. Input bit 7 discarded. |
+| B6 | All bits fixed 1 (0xFF); individual signal meanings not given. |
+| B7 | Whole byte=(IntTempX10 / 10)+50, assigned to uint8; integer division. Source comment: advised cabin temperature, C+50; 20 C gives 70 (0x46). Calculated even with power off. |
 
-Source contains suspect AND packing. These notes describe actual code and are not a corrected manufacturer protocol.
+Original Flowcode agrees with generated C; V57C Whale has the identical Webasto macro. Requested modes (source comment): 0=off, 1=park heating, 2=not used, 3=ventilation, 4=heating boost, 5=heating eco. These are not received working-mode codes. Actual B0 is zero. A processed reply enables the next send; no field-change comparison is implemented. See docs/EC600-WEBASTO-LIN.md for full bit tables and source trace.
 
 ## ID 58 / 0x3A — Space-heater information — multiple makes
 
@@ -458,20 +460,20 @@ Source routines / generated-C lines: FCM_EberspacherLIN (36595); main Eberspache
 
 ### Webasto
 
-Source routines / generated-C lines: FCM_WebastoLIN (53817).
+Source routines / generated-C lines: FCM_WebastoLIN (53817; parse 53859–53876; pack 53965–53982); active receive/status (71129–71192).
 
 | Byte | Meaning from source |
 | --- | --- |
-| B0 | b4..0=working mode; b7=diagnostic flag. |
-| B1 | b1..0=error status; b7..2 used as temperature fragment. |
-| B2 | b1..0=second temperature fragment; b7..2=voltage fragment. |
-| B3 | b1..0=second voltage fragment. |
-| B4 | Not defined by the reviewed PSU code. |
-| B5 | Not defined by the reviewed PSU code. |
-| B6 | b3 mask named heater error; b4 mask named altitude. Source then shifts by 4/5, yielding zero: do not copy those shifts as valid decoding. |
-| B7 | b6=component error; b7=LIN error. |
+| B0 | b4..0=WebastoCMode (raw 0–31, enum unknown); b6..5 not decoded; b7=WebastoCDiag ((B0 & 128) >> 7). Mode and diagnostic flag stored only. |
+| B1 | b1..0=WebastoCErrorStatus (raw 0–3, enum unknown), stored only. b7..2=temperature fragment: final WebastoCTemperature=(B1 & 252) AND (B2 & 3)=0. Parser says actual cabin temperature; declaration says medium temperature. |
+| B2 | b1..0=second temperature fragment; b7..2=voltage fragment. Final WebastoCVoltage=(B2 & 252) AND (B3 & 3)=0. Both decoded values stored only; physical scales unknown. |
+| B3 | b1..0=second voltage fragment; b7..2 not decoded. See B2 for actual zero-valued calculation. |
+| B4 | All eight bits copied to Lin58[4] but not decoded by Webasto routine; meaning unknown. |
+| B5 | All eight bits copied to Lin58[5] but not decoded by Webasto routine; meaning unknown. |
+| B6 | b3 masked as WebastoCHeaterError, then (B6 & 8) >> 4=0. b4 masked as WebastoCAltitude, then (B6 & 16) >> 5=0. Both stored only. b2..0 and b7..5 not decoded; meanings unknown. |
+| B7 | b5..0 not decoded. b6=WebastoCCompError, source label Comp Error (expansion unknown), stored only. b7=WebastoCLinError: 1 clears LinStatusHeat; 0 sets it after accepted reply. Heater status appears at CAN 53 B6 b0; bad receive count/status also clears it. |
 
-Temperature and voltage fragments are combined with disjoint AND operations in this source, giving zero. Physical scaling cannot be established from these calculations.
+Except LIN error, decoded Webasto status variables are stored without downstream consumers in reviewed V57B C. Temperature/voltage AND operations and heater-error/altitude shifts always yield zero; original Flowcode contains the same expressions. Received working-mode and error-status enums are unknown. An accepted eight-byte reply enables the next control send. See docs/EC600-WEBASTO-LIN.md for each field, its exact calculation and downstream use.
 
 ## ID 60 / 0x3C — Diagnostic / configuration request
 

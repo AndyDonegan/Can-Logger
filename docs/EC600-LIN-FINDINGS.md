@@ -146,6 +146,12 @@ commands to discover the version.
 
 ## Heater selection and the Webasto / Whale naming conflict
 
+Follow-up review, 29 September 2026: the [Webasto source walkthrough](EC600-WEBASTO-LIN.md)
+accounts for every control/status bit, traces downstream consumers and compares
+V57B with V57C Whale. Most decoded status values are stored only; B7 b7 affects
+the heater LIN-status indication. The suspect operations are present in the
+original Flowcode as well as generated C.
+
 CAN ID 133 (0x85), payload byte 2, reports SetOut3[2]. The receive command ID
 173 is not treated as confirmation. Reviewed firmware mappings are 0=None,
 1=Alde, 2=Truma CP+, 3=Whale, 4=Eberspacher, 5=Webasto LIN.
