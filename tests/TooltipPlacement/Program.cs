@@ -84,6 +84,10 @@ finally
 void VerifyLongLinPopup(string mode)
 {
     var tree = (TreeView)appType.GetField("_treeView", fields)!.GetValue(app)!;
+    // These checks drive the controller at synthetic anchors. GTK queries at
+    // the real cursor can target another row (or empty space) and dismiss it.
+    using var pausedQueries = new AutomaticTooltipPause(tree,
+        (TreeView)appType.GetField("_watchTreeView", fields)!.GetValue(app)!);
     var factory = typeof(LinScheme).Assembly.GetType("CanLogger.LinTooltip")!
         .GetMethod("ForTree", BindingFlags.NonPublic | BindingFlags.Static)!;
     var controller = factory.Invoke(null, new object[] { tree })!;
@@ -95,7 +99,7 @@ void VerifyLongLinPopup(string mode)
     var text = (TextView)type.GetField("_text", fields)!.GetValue(controller)!;
     foreach (int id in args.Contains("--hover-only") ? Array.Empty<int>() : new[] { 57, 58 })
     foreach (int x in new[] { 8, tree.AllocatedWidth - 8 })
-    foreach (int y in new[] { tree.AllocatedHeight * 3 / 4, tree.AllocatedHeight - 12 }) {
+    foreach (int y in new[] { 12, tree.AllocatedHeight / 4, tree.AllocatedHeight * 3 / 4, tree.AllocatedHeight - 12 }) {
         close.Invoke(controller, null);
         string full = LinScheme.Describe(id);
         show.Invoke(controller, new object[] { full, id.ToString(), x, y });
@@ -119,7 +123,7 @@ void VerifyLongLinPopup(string mode)
         }
         popup.Hidden -= hidden;
         if (hides != 0 || !popup.Visible || text.Buffer.Text != full || Math.Abs(adjustment.Value - bottom) > 1)
-            throw new Exception("Live updates disturbed open LIN details or scroll position");
+            throw new Exception($"Live updates disturbed {mode}/LIN {id} at {x},{y}: hides={hides}, visible={popup.Visible}, sameText={text.Buffer.Text == full}, scroll={bottom}->{adjustment.Value}");
         // Pointer entry must protect the interactive panel from the delayed close.
         type.GetField("_inside", fields)!.SetValue(controller, true);
         type.GetMethod("ScheduleClose", fields)!.Invoke(controller, null);
@@ -171,7 +175,7 @@ void VerifyLongLinPopup(string mode)
         close.Invoke(watch, null);
         Console.WriteLine("PASS: hover dwell, movement cancellation, repeated queries, cross-table dismissal, abandoned timer and single-popup ownership");
     }
-    if (!args.Contains("--hover-only")) Console.WriteLine($"PASS: {mode}/LIN 57 and 58: 8 bounded placements, full text, scrolling, stable snapshot across 80 updates");
+    if (!args.Contains("--hover-only")) Console.WriteLine($"PASS: {mode}/LIN 57 and 58: 16 bounded placements, full text, scrolling, stable snapshot across 160 updates");
 }
 
 void Query(TreeView tree, string field, int x, int y)
@@ -216,4 +220,20 @@ static class Native
     public static extern nuint gtk_tooltip_get_type();
     [DllImport("libgobject-2.0.so.0")]
     public static extern IntPtr g_object_new(nuint type, IntPtr firstProperty);
+}
+
+sealed class AutomaticTooltipPause : IDisposable
+{
+    private readonly (TreeView Tree, bool Enabled)[] _trees;
+
+    public AutomaticTooltipPause(params TreeView[] trees)
+    {
+        _trees = trees.Select(tree => (tree, tree.HasTooltip)).ToArray();
+        foreach (var (tree, _) in _trees) tree.HasTooltip = false;
+    }
+
+    public void Dispose()
+    {
+        foreach (var (tree, enabled) in _trees) tree.HasTooltip = enabled;
+    }
 }

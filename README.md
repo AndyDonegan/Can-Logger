@@ -1,6 +1,6 @@
 # CanLogger — CAN Bus Analyzer
 
-A **GTK# 3 desktop application** written in **C# (.NET 8)** for monitoring and sending CAN bus frames. It supports raw **Linux SocketCAN**, Windows-only **Waveshare USB-CAN-FD** and **iTEK/E&J USBCAN-I** analysers through WSL-to-Windows bridges, and an **SSH pipe** from `candump` for remote CAN buses.
+A **GTK# 3 desktop application** written in **C# (.NET 10)** for monitoring and sending CAN bus frames. It supports raw **Linux SocketCAN**, Windows-only **Waveshare USB-CAN-FD** and **iTEK/E&J USBCAN-I** analysers through WSL-to-Windows bridges, and an **SSH pipe** from `candump` for remote CAN buses.
 
 ---
 
@@ -47,7 +47,7 @@ A **GTK# 3 desktop application** written in **C# (.NET 8)** for monitoring and s
 
 | Layer | Technology |
 |-------|-----------|
-| **Language** | C# 12 (.NET 8) |
+| **Language** | C# 14 (.NET 10) |
 | **GUI Framework** | GTK# 3 (GtkSharp 3.24) |
 | **CAN (local)** | Linux SocketCAN — raw socket P/Invoke (`AF_CAN`, `socket()`, `bind()`, `read()`, `write()`) |
 | **CAN (Waveshare)** | Windows `ControlCANFD.dll` bridge launched directly from WSL |
@@ -88,10 +88,10 @@ Supporting files:
 
 ## Prerequisites
 
-- **.NET SDK 8.0** (or later)
+- **.NET 10 SDK 10.0.401 or newer within .NET 10** (selected by `global.json`)
 - **Linux** with either:
   - A CAN adapter and SocketCAN support, **or**
-  - WSL2 on Windows with a supported analyser's Windows driver and Windows .NET 8, **or**
+  - WSL2 on Windows with a supported analyser's Windows driver and Windows .NET 10 **x64 runtime**, **or**
   - SSH access to a machine running `candump` / `cansend`
 - **GTK 3 runtime** (usually pre-installed on desktop Linux):
   ```bash
@@ -170,6 +170,28 @@ Then run the app and connect to `vcan0`.
 
 ## Build & Run
 
+Install the [.NET 10 SDK](https://dotnet.microsoft.com/en-us/download/dotnet/10.0)
+in Linux/WSL. It includes the runtime needed by the GTK application. `global.json`
+selects SDK 10.0.401 or a newer stable .NET 10 SDK, without selecting .NET 11.
+Keep the SDK and runtime on current servicing patches.
+
+For iTEK or Waveshare, also install the **x64 .NET 10 runtime on Windows**.
+The bridges run the same `CanLogger.dll` with
+`C:\Program Files\dotnet\dotnet.exe`; a WSL installation alone does not provide
+that Windows runtime. A Windows .NET 10 SDK also satisfies this requirement.
+The Microchip LIN receiver continues to use its bundled Java runtime.
+
+Check the installations from WSL:
+
+```bash
+dotnet --version
+dotnet --list-runtimes
+"/mnt/c/Program Files/dotnet/dotnet.exe" --list-runtimes
+```
+
+After rebuilding for .NET 10, use `dotnet run` directly. No
+`DOTNET_ROLL_FORWARD` override is needed.
+
 ```bash
 cd CanLogger
 
@@ -195,6 +217,24 @@ ssh piZero candump can0 | dotnet run -- --stdin
 ```
 
 The `--stdin` flag switches to the `CandumpStdinBackend`, which parses `candump`-formatted lines from standard input and sends frames via `ssh <host> cansend <iface>`.
+
+### Verification
+
+The regression checks are console programs, run with `dotnet run` rather than
+`dotnet test`. The UI checks need a GTK desktop (Wayland/WSLg for tooltip coverage)
+and use synthetic frames without connecting to adapters:
+
+```bash
+dotnet run --project tests/LinReceive -c Release
+for check in checksum reference configuration watch combined logging; do
+    dotnet run --project tests/LinReceive -c Release -- --$check-ui || break
+done
+dotnet run --project tests/LiveWatch -c Release
+dotnet run --project tests/TooltipPlacement -c Release
+```
+
+The optional `--hardware` and `--ui` LIN checks in
+[LIN setup and first test](docs/LIN-RECEIVE-TEST.md) require the connected analyzer.
 
 ---
 
@@ -377,7 +417,7 @@ run any privileged configuration command.
 | `CanScheme.cs` | CAN bus scheme loader — parses `can-scheme.csv` into `CanIdDef` / `ByteDef` objects |
 | `CanSchemeDialog.cs` | Watch List panel widget + Info dialog with per-byte details |
 | `can-scheme.csv` | CAN ID definitions shipped with the application |
-| `CanLogger.csproj` | .NET 8 project file with GtkSharp NuGet reference |
+| `CanLogger.csproj` | .NET 10 project file with GtkSharp NuGet reference |
 | `scripts/install-itek-api.sh` | Downloads and verifies the official 64-bit iTEK USBCAN API |
 
 ---

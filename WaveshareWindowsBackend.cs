@@ -52,7 +52,7 @@ public sealed class WaveshareWindowsBackend : ICanBackend, IDisposable
         if (!IsWaveshareInterface(interfaceName))
             throw new ArgumentException($"Unknown Waveshare interface '{interfaceName}'.");
         if (!File.Exists(WindowsDotnet))
-            throw new IOException("Windows .NET 8 is required for the Waveshare bridge.");
+            throw new IOException("Windows .NET 10 x64 runtime is required for the Waveshare bridge.");
 
         string assemblyPath = Path.Combine(AppContext.BaseDirectory, "CanLogger.dll");
         string nativeDll = Path.Combine(AppContext.BaseDirectory, "ControlCANFD.dll");

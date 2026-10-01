@@ -148,6 +148,11 @@ internal sealed class LinHoverPopup
         _active = this;
         _tree.TooltipWindow?.Hide();
         _popup.ShowAll();
+        // GTK reports a zero size while hidden, so changing PointingTo before
+        // showing a reused popover can leave its position based on that size.
+        // The toplevel owns popover placement: allocate it again with the
+        // visible content so the full popup is clamped to the window.
+        parent.QueueResize();
     }
 }
 

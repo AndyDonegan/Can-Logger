@@ -229,6 +229,8 @@ if (args.Contains("--watch-ui")) {
     void Call(string name, params object[] values) => typeof(CanAnalyzerApp).GetMethod(name, flags)!.Invoke(app, values);
     var window = (Gtk.Window)typeof(CanAnalyzerApp).GetMethod("BuildWindow", flags)!.Invoke(app, null)!;
     var panel = (LinReceivePanel)Field("_linPanel");
+    // Match CanAnalyzerApp.Run: Live Watch needs the owning application window.
+    typeof(CanAnalyzerApp).GetField("_window", flags)!.SetValue(app, window);
     var store = (Gtk.ListStore)Field("_watchStore");
     var tree = (Gtk.TreeView)Field("_watchTreeView");
     var canInput = (Gtk.Entry)Field("_watchIdEntry");
@@ -313,9 +315,23 @@ if (args.Contains("--combined-ui")) {
         queue.Enqueue(partial);
         Pump();
         Check(rows.IterNChildren() == 3, "Both receive paths did not reach combined view");
-        rows.IterNthChild(out var incomplete, 0);
-        rows.IterNthChild(out var lin, 1);
-        rows.IterNthChild(out var can, 2);
+        // CAN idle callbacks and LIN timers can run in either order. Identify
+        // each frame by its bus and ID instead of assuming cross-bus ordering.
+        Gtk.TreeIter FindRow(string bus, int id) {
+            Gtk.TreeIter found = default;
+            int matches = 0;
+            rows.Foreach((model, path, row) => {
+                if ((string)model.GetValue(row, 11) == bus && (int)model.GetValue(row, 2) == id) {
+                    found = row; matches++;
+                }
+                return false;
+            });
+            Check(matches == 1, $"Expected one {bus} frame with ID {id}; found {matches}");
+            return found;
+        }
+        var incomplete = FindRow("LIN", 52);
+        var lin = FindRow("LIN", 57);
+        var can = FindRow("CAN", 133);
         Check((string)rows.GetValue(lin, 11) == "LIN" && (string)rows.GetValue(can, 11) == "CAN", "Mixed bus labels incorrect");
         Check((int)rows.GetValue(lin, 2) == 57 && (string)rows.GetValue(lin, 4) == "0x39", "LIN ID decimal/hex incorrect");
         Check((string)rows.GetValue(lin, 3) == "210 10 0 0 0 0 163 11" && (string)rows.GetValue(lin, 6) == "D2 0A 00 00 00 00 A3 0B" && (int)rows.GetValue(lin, 5) == 8, "Payload included checksum or conversion failed");

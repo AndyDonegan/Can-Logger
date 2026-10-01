@@ -47,7 +47,7 @@ public sealed class ItekWindowsBackend : ICanBackend, IDisposable
         if (!IsItekInterface(interfaceName))
             throw new ArgumentException($"Unknown iTEK interface '{interfaceName}'.");
         if (!File.Exists(WindowsDotnet))
-            throw new IOException("Windows .NET 8 is required for the iTEK bridge.");
+            throw new IOException("Windows .NET 10 x64 runtime is required for the iTEK bridge.");
 
         string assemblyPath = Path.Combine(AppContext.BaseDirectory, "CanLogger.dll");
         string transportDll = Path.Combine(AppContext.BaseDirectory, "kerneldlls", "usbcan.dll");

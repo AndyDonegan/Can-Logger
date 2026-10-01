@@ -33,11 +33,13 @@ From this project's WSL directory, prepare/rebuild the optional helper with:
 ```sh
 python3 scripts/setup-lin-receiver.py
 dotnet build
-DOTNET_ROLL_FORWARD=Major dotnet run --no-build
+dotnet run --no-build
 ```
 
-The runtime override is needed on this development machine because it has .NET
-10 rather than .NET 8. A machine with .NET 8 installed can use `dotnet run` directly.
+The application and tests target .NET 10. Install the SDK selected by
+`global.json` (10.0.401 or a newer stable .NET 10 SDK) in WSL; its bundled .NET 10
+runtime runs the GTK application without a roll-forward override. The iTEK and
+Waveshare CAN bridges additionally require the Windows .NET 10 x64 runtime.
 
 Setup fetches a pinned [Microchip TB3180 library archive](https://ww1.microchip.com/downloads/aemDocuments/documents/OTH/ApplicationNotes/AppnoteSourceCode/LIN_Library_API_Demo.zip)
 and a pinned [Azul Zulu Java 8 FX Windows runtime](https://cdn.azul.com/zulu/bin/zulu8.96.0.205-ca-fx-jdk8.0.504-win_x64.zip),
@@ -98,10 +100,10 @@ and simultaneous live CAN/LIN traffic still require hardware checks.
 Regression and hardware test commands:
 
 ```sh
-DOTNET_ROLL_FORWARD=Major dotnet run --project tests/LinReceive
-DOTNET_ROLL_FORWARD=Major dotnet run --project tests/LinReceive -- --hardware
-DOTNET_ROLL_FORWARD=Major dotnet run --project tests/LinReceive -- --ui
-DOTNET_ROLL_FORWARD=Major dotnet run --project tests/TooltipPlacement
+dotnet run --project tests/LinReceive
+dotnet run --project tests/LinReceive -- --hardware
+dotnet run --project tests/LinReceive -- --ui
+dotnet run --project tests/TooltipPlacement
 ```
 
 The parser tests cover payload/checksum separation, checksum variants, parity,
@@ -250,5 +252,5 @@ preserve raw bytes, PID comparison, checksum candidate, reported baud and adapte
 time. CAN send-row assignment rejects LIN frames. Clear resets the combined view and receive counters;
 file logging records displayed CAN and LIN rows using the same ten visible columns.
 
-Run `DOTNET_ROLL_FORWARD=Major dotnet run --project tests/LinReceive -- --combined-ui`
+Run `dotnet run --project tests/LinReceive -- --combined-ui`
 for injected mixed-stream coverage without transmitting to the attached hardware.
